@@ -4,3 +4,89 @@ result-*
 
 # Ignore automatically generated direnv output
 .direnv
+
+########################################
+# CMake
+########################################
+
+# Build directories
+/build/
+/build-*/
+/cmake-build-*/
+install_manifest.txt
+
+# CMake-generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+
+# Exported compile DB (if generated)
+*.dir/
+
+# Ninja build files
+*.ninja
+.ninja_deps
+.ninja_log
+
+########################################
+# C and C++ artifacts
+########################################
+
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.dylib
+*.lib
+*.exe
+
+# Clangd cache (optional)
+.cache/
+
+########################################
+# Rust
+########################################
+
+# Cargo output directory
+nix-crypto/target/
+
+# Cargo package metadata
+**/*.rs.bk
+
+# Rustfmt backups
+**/*.rs.bk
+
+########################################
+# OS / Editor files
+########################################
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Linux
+*~
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+########################################
+# Misc
+########################################
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+
