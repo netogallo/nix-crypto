@@ -13,4 +13,23 @@ impl From<ErrorStack> for Error {
 
 pub struct CryptoNix {}
 
+impl CryptoNix {
+
+    pub fn with_directory() -> CryptoNix {
+        CryptoNix{}
+    }
+}
+
+#[repr(C)]
+pub struct CryptoNixManaged {
+    cryptonix : CryptoNix
+}
+
+impl CryptoNixManaged {
+
+    pub fn with_directory() -> CryptoNixManaged {
+
+        CryptoNixManaged { cryptonix: CryptoNix::with_directory() }
+    }
+}
 
