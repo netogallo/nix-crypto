@@ -52,7 +52,7 @@ compile_commands.json
 ########################################
 
 # Cargo output directory
-nix-crypto/target/
+target/
 
 # Cargo package metadata
 **/*.rs.bk
