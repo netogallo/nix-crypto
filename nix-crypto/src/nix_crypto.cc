@@ -7,10 +7,10 @@
 #include <nix/util/config-global.hh>
 
 
-#include "nix_crypto.hh"
+//#include "nix-crypto.hh"
+#include "nix-crypto/src/lib.rs.h"
 
 using namespace nix;
-
 
 static void primop_add(EvalState & state, const PosIdx pos, Value ** args, Value & v) {
 
@@ -34,8 +34,20 @@ static void primop_age(EvalState & state, const PosIdx pos, Value ** _args, Valu
     v.mkAttrs(attrs);
 }
 
-static RegisterPrimOp age({
-    .name = "__age",
-    .arity = 0,
-    .fun = primop_age,
-});
+CryptoNixPrimops::CryptoNixPrimops()
+    : age({
+      .name = "__age",
+      .arity = 0,
+      .fun = primop_age,
+    })
+    {}
+
+std::unique_ptr<CryptoNixPrimops> primops;
+
+void init_primops() {
+    primops = std::make_unique<CryptoNixPrimops>();
+}
+
+void destroy_primops() {
+    primops.reset();
+}

@@ -10,3 +10,8 @@ crate-type = ["cdylib"]
 age = { version = "0.11", features = ["armor"] }
 libc = "0.2"
 openssl = "0.10"
+cxx = "1.0"
+ctor = "0.2"
+
+[build-dependencies]
+cxx-build = "1.0"
