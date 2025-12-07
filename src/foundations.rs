@@ -2,7 +2,8 @@ use openssl::error::{ErrorStack};
 use std::collections::{HashMap};
 
 pub enum Error {
-    OpensslError(ErrorStack)
+    OpensslError(ErrorStack),
+    CxxError(String)
 }
 
 impl From<ErrorStack> for Error {
@@ -15,21 +16,12 @@ pub struct CryptoNix {}
 
 impl CryptoNix {
 
-    pub fn with_directory() -> CryptoNix {
+    pub fn with_directory(path : String) -> CryptoNix {
         CryptoNix{}
     }
-}
 
-#[repr(C)]
-pub struct CryptoNixManaged {
-    cryptonix : CryptoNix
-}
-
-impl CryptoNixManaged {
-
-    pub fn with_directory() -> CryptoNixManaged {
-
-        CryptoNixManaged { cryptonix: CryptoNix::with_directory() }
+    pub fn with_error(error: Error) -> CryptoNix {
+        CryptoNix{}
     }
 }
 

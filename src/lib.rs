@@ -1,31 +1,53 @@
 use ctor::{ctor,dtor};
-use cxx::{UniquePtr};
+use cxx::{CxxString};
+use std::boxed::{Box};
 use std::ffi::{c_int};
 use std::cell::{OnceCell};
 
-use crate::foundations::{CryptoNixManaged};
+use crate::foundations::{CryptoNix, Error};
 
-//#[unsafe(no_mangle)]
-// pub extern "C"
 fn rust_add(left: u64, right: u64) -> u64 {
     left + right
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cryptonix_with_directory() -> *mut CryptoNixManaged {
-	Box::into_raw(Box::new(CryptoNixManaged::with_directory()))
+/// Create a managed instance of 'CryptoNix' using a filesystem
+/// directory as store. This function will create a directory located
+/// at the specified 'path' (if missing). This directory will be used
+/// to store all the private cryptographic keys. If 'path'
+/// already exist, it is exepcted to be a store from previous usages
+/// of 'CryptoNix'. The managed pointer must be manually destroyed
+/// using the 'cryptonix_destroy' function.
+unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix {
+
+    let utf8_error = "The path provided to cryptonix is not a valid utf-8 string";
+
+    unsafe {
+        match (*path).to_str() {
+            Ok(rust_path) => Box::into_raw(
+                Box::new(CryptoNix::with_directory(rust_path.to_string()))
+            ),
+            Err(_err) => Box::into_raw(
+                Box::new(CryptoNix::with_error(Error::CxxError(utf8_error.to_string())))
+            )
+        }
+    }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cryptonix_delete(ptr: *mut CryptoNixManaged) {
-	if !ptr.is_null() {
-		unsafe { drop(Box::from_raw(ptr)) }
-	}
+/// Destroy a manged instance of 'CryptoNix'.
+unsafe fn cryptonix_destroy(cryptonix: *mut CryptoNix) {
+    unsafe {
+        Box::from_raw(cryptonix);
+    }
 }
 
 #[cxx::bridge]
 mod ffi {
     extern "Rust" {
+
+        type CryptoNix;
+
+        unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix;
+        unsafe fn cryptonix_destroy(cryptonix: *mut CryptoNix);
         fn rust_add(left: u64, right: u64) -> u64;
     }
 

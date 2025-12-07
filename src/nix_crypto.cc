@@ -7,7 +7,6 @@
 #include <nix/util/config-global.hh>
 
 
-//#include "nix-crypto.hh"
 #include "nix-crypto/src/lib.rs.h"
 
 using namespace nix;
@@ -40,7 +39,13 @@ CryptoNixPrimops::CryptoNixPrimops()
       .arity = 0,
       .fun = primop_age,
     })
-    {}
+    , cryptoNix(cryptonix_with_directory(""))
+    {
+    }
+
+CryptoNixPrimops::~CryptoNixPrimops() {
+    cryptonix_destroy(cryptoNix);
+}
 
 std::unique_ptr<CryptoNixPrimops> primops;
 
