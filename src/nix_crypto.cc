@@ -7,7 +7,7 @@
 #include <nix/util/config-global.hh>
 
 
-#include "nix-crypto/src/lib.rs.h"
+#include "nix-crypto/src/cxx_bridge.rs.h"
 
 using namespace nix;
 
