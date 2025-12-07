@@ -4,6 +4,11 @@ use std::boxed::{Box};
 use std::ffi::{c_int};
 use std::cell::{OnceCell};
 
+
+mod foundations;
+mod age;
+mod openssl;
+
 use crate::foundations::{CryptoNix, Error};
 
 fn rust_add(left: u64, right: u64) -> u64 {
@@ -36,7 +41,20 @@ unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix {
 /// Destroy a manged instance of 'CryptoNix'.
 unsafe fn cryptonix_destroy(cryptonix: *mut CryptoNix) {
     unsafe {
-        Box::from_raw(cryptonix);
+        let _ = Box::from_raw(cryptonix);
+    }
+}
+
+type OpensslPrivateKey = crate::openssl::pkey::Key;
+
+impl CryptoNix {
+
+    pub fn cxx_openssl_private_key(self: &CryptoNix, key_type: &CxxString, identity: &CxxString) -> Result<Box<OpensslPrivateKey>, Error> {
+
+        let key_type_rs = (*key_type).to_str()?;
+        let identity_rs = (*identity).to_str()?;
+        let key = self.openssl_private_key(key_type_rs, identity_rs)?;
+        Ok(Box::new(key))
     }
 }
 
@@ -49,6 +67,10 @@ mod ffi {
         unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix;
         unsafe fn cryptonix_destroy(cryptonix: *mut CryptoNix);
         fn rust_add(left: u64, right: u64) -> u64;
+
+        type OpensslPrivateKey;
+        fn cxx_openssl_private_key(self: &CryptoNix, key_type: &CxxString, identity: &CxxString) -> Result<Box<OpensslPrivateKey>>;
+
     }
 
     unsafe extern "C++" {
@@ -70,6 +92,4 @@ fn exit() {
     ffi::destroy_primops();
 }
 
-mod foundations;
-mod age;
-mod openssl;
+
