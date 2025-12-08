@@ -1,5 +1,6 @@
 fn main() {
-    cxx_build::bridge("src/cxx_bridge.rs")
+    let modules = vec!("src/cxx_bridge.rs");
+    cxx_build::bridges(modules)
         .file("src/nix_crypto.cc")
         .std("c++23")
         .compile("cxx");

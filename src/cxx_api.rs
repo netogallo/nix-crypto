@@ -1,6 +1,7 @@
 use cxx::{CxxString, let_cxx_string};
 use std::boxed::{Box};
 
+use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
 use crate::foundations::{CryptoNix, Error};
 
 pub fn rust_add(left: u64, right: u64) -> u64 {
@@ -37,11 +38,9 @@ pub type OpensslPrivateKey = crate::openssl::pkey::Key;
 
 impl CryptoNix {
 
-    pub fn cxx_openssl_private_key(self: &CryptoNix, key_type: &CxxString, identity: &CxxString) -> Result<Box<OpensslPrivateKey>, Error> {
+    pub fn cxx_openssl_private_key(self: &CryptoNix, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<OpensslPrivateKey>, Error> {
 
-        let key_type_rs = (*key_type).to_str()?;
-        let identity_rs = (*identity).to_str()?;
-        let key = self.openssl_private_key(key_type_rs, identity_rs)?;
+        let key = self.openssl_private_key(&key_identity)?;
         Ok(Box::new(key))
     }
 }

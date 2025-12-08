@@ -1,4 +1,5 @@
 use crate::foundations::{CryptoNix, Error};
+use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
 
 pub mod pkey {
     use openssl::pkey::{Public, Private};
@@ -21,6 +22,14 @@ pub mod pkey {
                 "rsa" => Ok(Type::RsaKey),
                 _ => Error::fail_with(error_message)
             }
+        }
+    }
+
+    impl TryFrom<&String> for Type {
+        type Error = Error;
+
+        fn try_from(value: &String) -> Result<Type, Error> {
+            Type::try_from(value.as_str())
         }
     }
 
@@ -53,11 +62,10 @@ impl CryptoNix {
     /// key will be saved to the store.
     pub fn openssl_private_key(
         &self,
-        key_type_str: &str,
-        key_identity: &str
+        key_identity: &OpensslPrivateKeyIdentity
     ) -> Result<pkey::Key, Error> {
 
-        let key_type = pkey::Type::try_from(key_type_str)?;
+        let key_type = pkey::Type::try_from(&key_identity.key_type)?;
 
         //Todo: check if key already in store
         pkey::Key::new(key_type)

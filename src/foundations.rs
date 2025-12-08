@@ -31,7 +31,14 @@ impl From<string::FromUtf8Error> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Error in rust code!")
+
+        match self {
+            Error::OpensslError(stack) => stack.fmt(f),
+            Error::CxxError(msg) => write!(f, "{}", msg),
+            Error::Utf8Error(msg) => msg.fmt(f),
+            Error::FromUtf8Error(msg) => msg.fmt(f),
+            _ => write!(f, "Unknown error in the 'nix-crypto' Rust code.")
+        }
     }
 }
 
