@@ -21,7 +21,7 @@ pub unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix {
 
     match (*path).to_str() {
         Ok(rust_path) => Box::into_raw(
-            Box::new(CryptoNix::with_directory(rust_path.to_string()))
+            Box::new(CryptoNix::with_directory(rust_path))
         ),
         Err(_err) => Box::into_raw(
             Box::new(CryptoNix::with_error(Error::CxxError(utf8_error.to_string())))

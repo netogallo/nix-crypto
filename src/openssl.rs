@@ -1,4 +1,4 @@
-use crate::foundations::{CryptoNix, Error};
+use crate::foundations::{CryptoNix, IsCryptoStoreKey, Error};
 use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
 
 pub mod pkey {
@@ -53,6 +53,13 @@ pub mod pkey {
             let result = String::from_utf8(pem_vec)?;
             Ok(result)
         }
+    }
+}
+
+impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
+
+    fn into_crypto_store_key(&self) -> Vec<u8> {
+        vec![6,6,6]
     }
 }
 
