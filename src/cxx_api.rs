@@ -1,4 +1,4 @@
-use cxx::{CxxString};
+use cxx::{CxxString, let_cxx_string};
 use std::boxed::{Box};
 
 use crate::foundations::{CryptoNix, Error};

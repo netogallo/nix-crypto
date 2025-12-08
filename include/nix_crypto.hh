@@ -16,8 +16,11 @@ class CryptoNixPrimops {
   CryptoNixPrimops();
   ~CryptoNixPrimops();
 
+  std::string openssl_public_key_pem(std::string& key_type, std::string& key_identity);
+
   private:
   nix::RegisterPrimOp age;
+  nix::RegisterPrimOp openssl;
   CryptoNix* cryptoNix;
 };
 

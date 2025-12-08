@@ -1,6 +1,7 @@
 use cxx::{CxxString};
 
 use crate::cxx_api::*;
+use crate::openssl;
 use crate::foundations::{CryptoNix};
 
 #[cxx::bridge]
@@ -15,6 +16,8 @@ pub mod ffi {
 
         type OpensslPrivateKey;
         fn cxx_openssl_private_key(self: &CryptoNix, key_type: &CxxString, identity: &CxxString) -> Result<Box<OpensslPrivateKey>>;
+
+        fn public_pem(self: &OpensslPrivateKey) -> Result<String>;
 
     }
 
