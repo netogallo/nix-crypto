@@ -10,7 +10,8 @@ pub enum Error {
     CxxError(String),
     Utf8Error(str::Utf8Error),
     FromUtf8Error(string::FromUtf8Error),
-    SledError(sled::Error)
+    SledError(sled::Error),
+    CryptoNixError(String)
 }
 
 impl From<sled::Error> for Error {
@@ -53,12 +54,12 @@ impl fmt::Display for Error {
 impl Error {
 
     pub fn fail_with<T>(msg: String) -> Result<T, Error> {
-        Err(Error::CxxError(msg))
+        Err(Error::CryptoNixError(msg))
     }
 }
 
 pub trait IsCryptoStoreKey {
-    fn into_crypto_store_key(&self) -> Vec<u8>;
+    fn into_crypto_store_key(&self, salt: &[u8]) -> Vec<u8>;
 }
 
 /// The 'CryptoStore' defines the behavior expected from
@@ -68,6 +69,12 @@ pub trait IsCryptoStoreKey {
 pub trait CryptoStore {
     fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
     fn put_raw(&self, key: &[u8], value: &Vec<u8>) -> Result<(), Error>;
+
+    /// This function should return a salt that 'CryptoNix' will use
+    /// to hash values. The salt is expected to be unique per store instance
+    /// and to remain constant whenever the same store is intialized upon
+    /// different runs of the program.
+    fn salt(&self) -> Vec<u8>;
 }
 
 pub trait CryptoStoreExtensions {
@@ -82,6 +89,10 @@ pub trait CryptoStoreExtensions {
 struct ErrorStore {
 }
 
+// Todo: A salt should be generated upon the store initialization
+// and use that salt instead
+static SALT : &[u8] = "72d12af4-adf5-42f6-938f-d504210d5492".as_bytes();
+
 impl CryptoStore for ErrorStore {
 
     fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
@@ -90,6 +101,10 @@ impl CryptoStore for ErrorStore {
 
     fn put_raw(&self, key: &[u8], value: &Vec<u8>) -> Result<(), Error> {
         panic!("Not implemented")
+    }
+
+    fn salt(&self) -> Vec<u8> {
+        Vec::from(SALT)
     }
 }
 
@@ -108,6 +123,12 @@ impl CryptoStore for SledStore {
     fn put_raw(&self, key: &[u8], value: &Vec<u8>) -> Result<(), Error> {
         panic!("Not implemented")
     }
+
+    fn salt(&self) -> Vec<u8> {
+        // Todo: Salt should be generated for every instance and
+        // saved in the sled store
+        Vec::from(SALT)
+    }
 }
 
 impl SledStore {
@@ -123,10 +144,14 @@ pub struct CryptoNix {
 
 impl CryptoNix {
 
-
+    /// Try getting a value from the 'CryptoStore' which is associated
+    /// with the 'key' parameter. If the value does not exist in the
+    /// store, 'Nothing' is returned. Otherwise the value gets returned.
+    /// This function might raise 'Error' if there is a fundamental issue
+    /// with the store which prevents it from being read.
     pub fn get<K: IsCryptoStoreKey, V: for<'v> TryFrom<&'v Vec<u8>, Error = Error>>(&self, key: &K) -> Result<Option<V>, Error> {
 
-        match self.store.get_raw(&key.into_crypto_store_key()[..])? {
+        match self.store.get_raw(&key.into_crypto_store_key(&self.salt()[..])[..])? {
             Some(vec) => Ok(Some(V::try_from(&vec)?)),
             _ => Ok(None)
         }
@@ -139,9 +164,13 @@ impl CryptoNix {
     ) -> Result<(), Error>
     where Vec<u8> : for<'a> TryFrom<&'a V, Error = Error> {
         self.store.put_raw(
-            &key.into_crypto_store_key()[..],
+            &key.into_crypto_store_key(&self.salt()[..])[..],
             &Vec::try_from(value)?
         )
+    }
+
+    pub fn salt(&self) -> Vec<u8> {
+        self.store.salt()
     }
 
     pub fn with_directory(path : &str) -> CryptoNix {
@@ -158,4 +187,3 @@ impl CryptoNix {
         }
     }
 }
-

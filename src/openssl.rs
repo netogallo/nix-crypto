@@ -1,5 +1,6 @@
 use crate::foundations::{CryptoNix, CryptoStore, CryptoStoreExtensions, IsCryptoStoreKey, Error};
 use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
+use openssl::sha;
 
 pub mod pkey {
     use openssl::pkey::{Public, Private};
@@ -7,8 +8,28 @@ pub mod pkey {
 
     use crate::foundations::{Error};
 
+    #[repr(u8)]
     pub enum Type {
-        RsaKey
+        RsaKey = 0
+    }
+
+    impl From<u8> for Type {
+
+        fn from(value: u8) -> Type {
+
+            if(value == Type::RsaKey as u8) {
+                return Type::RsaKey;
+            }
+            
+            panic!("The value {} is not a vaild RSA key type", value)
+        }
+    }
+
+    impl From<Type> for u8 {
+
+        fn from(value: Type) -> u8 {
+            value as u8
+        }
     }
 
     impl TryFrom<&str> for Type {
@@ -59,7 +80,14 @@ pub mod pkey {
         type Error = Error;
 
         fn try_from(value: &Vec<u8>) -> Result<Key, Error> {
-            panic!("tbd")
+
+            match Type::from(value[0]) {
+                Type::RsaKey => {
+                    let rsa_key = rsa::Rsa::private_key_from_pem(&value[1..])?;
+                    Ok(Key::Rsa(rsa_key))
+                },
+                _ => Error::fail_with(format!("The value {} is not a known Openssl key type.", value[0]))
+            }
         }
     }
 
@@ -67,15 +95,26 @@ pub mod pkey {
         type Error = Error;
 
         fn try_from(value: &Key) -> Result<Vec<u8>, Error> {
-            panic!("tbd")
+
+            match value {
+                Key::Rsa(key) => {
+                    let mut key_bytes = key.private_key_to_pem()?;
+                    key_bytes.insert(0, u8::from(Type::RsaKey));
+                    Ok(key_bytes)
+                }
+            }
         }
     }
 }
 
 impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
 
-    fn into_crypto_store_key(&self) -> Vec<u8> {
-        vec![6,6,6]
+    fn into_crypto_store_key(&self, salt: &[u8]) -> Vec<u8> {
+        let mut hasher = sha::Sha256::new();
+        hasher.update(salt);
+        hasher.update(self.key_type.as_bytes());
+        hasher.update(self.key_id.as_bytes());
+        Vec::from(hasher.finish())
     }
 }
 
@@ -98,9 +137,5 @@ impl CryptoNix {
                 Ok(key)
             }
         }
-        //let key_type = pkey::Type::try_from(&key_identity.key_type)?;
-
-        //Todo: check if key already in store
-        //pkey::Key::new(key_type)
     }
 }
