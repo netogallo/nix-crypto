@@ -1,5 +1,6 @@
 use core::str;
 use openssl::error::{ErrorStack};
+use std::borrow::{Borrow};
 use std::collections::{HashMap};
 use std::fmt;
 use std::string;
@@ -73,18 +74,6 @@ pub trait CryptoStoreExtensions {
     fn get<K: IsCryptoStoreKey, V: for<'v> TryFrom<&'v Vec<u8>, Error = Error>>(&self, key: K) -> Result<Option<V>, Error>;
 }
 
-impl<T: CryptoStore> CryptoStoreExtensions for T {
-
-    fn get<K: IsCryptoStoreKey, V: for<'v> TryFrom<&'v Vec<u8>, Error = Error>>(&self, key: K) -> Result<Option<V>, Error> {
-
-        match self.get_raw(&key.into_crypto_store_key()[..])? {
-            Some(vec) => Ok(Some(V::try_from(&vec)?)),
-            _ => Ok(None)
-        }
-    }
-}
-
-
 /// The 'ErrorStore' represents a store that will fail
 /// on every operation. This is meant to avoid the
 /// case of Nix hard-crashing if the store cannot
@@ -133,6 +122,27 @@ pub struct CryptoNix {
 }
 
 impl CryptoNix {
+
+
+    pub fn get<K: IsCryptoStoreKey, V: for<'v> TryFrom<&'v Vec<u8>, Error = Error>>(&self, key: &K) -> Result<Option<V>, Error> {
+
+        match self.store.get_raw(&key.into_crypto_store_key()[..])? {
+            Some(vec) => Ok(Some(V::try_from(&vec)?)),
+            _ => Ok(None)
+        }
+    }
+
+    pub fn put<K: IsCryptoStoreKey, V>(
+        &self,
+        key: &K,
+        value: &V
+    ) -> Result<(), Error>
+    where Vec<u8> : for<'a> TryFrom<&'a V, Error = Error> {
+        self.store.put_raw(
+            &key.into_crypto_store_key()[..],
+            &Vec::try_from(value)?
+        )
+    }
 
     pub fn with_directory(path : &str) -> CryptoNix {
 

@@ -1,4 +1,4 @@
-use crate::foundations::{CryptoNix, IsCryptoStoreKey, Error};
+use crate::foundations::{CryptoNix, CryptoStore, CryptoStoreExtensions, IsCryptoStoreKey, Error};
 use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
 
 pub mod pkey {
@@ -54,6 +54,22 @@ pub mod pkey {
             Ok(result)
         }
     }
+
+    impl TryFrom<&Vec<u8>> for Key {
+        type Error = Error;
+
+        fn try_from(value: &Vec<u8>) -> Result<Key, Error> {
+            panic!("tbd")
+        }
+    }
+
+    impl TryFrom<&Key> for Vec<u8> {
+        type Error = Error;
+
+        fn try_from(value: &Key) -> Result<Vec<u8>, Error> {
+            panic!("tbd")
+        }
+    }
 }
 
 impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
@@ -72,9 +88,19 @@ impl CryptoNix {
         key_identity: &OpensslPrivateKeyIdentity
     ) -> Result<pkey::Key, Error> {
 
+
         let key_type = pkey::Type::try_from(&key_identity.key_type)?;
+        match self.get(key_identity)? {
+            Some(key) => Ok(key),
+            None => {
+                let key = pkey::Key::new(key_type)?;
+                self.put(key_identity, &key)?;
+                Ok(key)
+            }
+        }
+        //let key_type = pkey::Type::try_from(&key_identity.key_type)?;
 
         //Todo: check if key already in store
-        pkey::Key::new(key_type)
+        //pkey::Key::new(key_type)
     }
 }
