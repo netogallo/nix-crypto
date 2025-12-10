@@ -8,31 +8,29 @@ pub fn rust_add(left: u64, right: u64) -> u64 {
     left + right
 }
 
-/// Create a managed instance of 'CryptoNix' using a filesystem
-/// directory as store. This function will create a directory located
-/// at the specified 'path' (if missing). This directory will be used
-/// to store all the private cryptographic keys. If 'path'
-/// already exist, it is exepcted to be a store from previous usages
-/// of 'CryptoNix'. The managed pointer must be manually destroyed
-/// using the 'cryptonix_destroy' function.
-pub unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix {
+/// Create a 'CryptoNix' instance. This function accepts
+/// a 'CxxString' with the parameters for 'CryptoNix'. It
+/// will process the parameters as appropiate and construct
+/// an instance of cryptonix configured with the given parameters.
+pub fn cryptonix_with_settings(params: &CxxString) -> Box<CryptoNix> {
 
     let utf8_error = "The path provided to cryptonix is not a valid utf-8 string";
 
-    match (*path).to_str() {
-        Ok(rust_path) => Box::into_raw(
-            Box::new(CryptoNix::with_directory(rust_path))
-        ),
-        Err(_err) => Box::into_raw(
+    match (*params).to_str() {
+        Ok(rust_params) => {
+            panic!("I did not like the paramters {}", rust_params);
+            Box::new(CryptoNix::with_directory(rust_params))
+        },
+        Err(_err) =>
             Box::new(CryptoNix::with_error(Error::CxxError(utf8_error.to_string())))
-        )
     }
 }
 
-/// Destroy a manged instance of 'CryptoNix'.
-pub unsafe fn cryptonix_destroy(cryptonix: *mut CryptoNix) {
-    let _ = Box::from_raw(cryptonix);
-}
+/// Destroy the 'CryptoNix' instance. This function simply
+/// takes ownership of the 'CryptoNix' instance which
+/// results in it being dropped when the function
+/// returns.
+pub fn cryptonix_destroy(cryptonix: Box<CryptoNix>) {}
 
 pub type OpensslPrivateKey = crate::openssl::pkey::Key;
 

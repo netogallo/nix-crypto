@@ -16,8 +16,8 @@ pub mod ffi {
 
         type CryptoNix;
 
-        unsafe fn cryptonix_with_directory(path: &CxxString) -> *mut CryptoNix;
-        unsafe fn cryptonix_destroy(cryptonix: *mut CryptoNix);
+        fn cryptonix_with_settings(settings: &CxxString) -> Box<CryptoNix>;
+        fn cryptonix_destroy(cryptonix: Box<CryptoNix>);
         fn rust_add(left: u64, right: u64) -> u64;
 
         type OpensslPrivateKey;

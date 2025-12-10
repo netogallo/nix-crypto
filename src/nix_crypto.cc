@@ -1,12 +1,3 @@
-#include <nix/cmd/common-eval-args.hh>
-#include <nix/expr/eval-settings.hh>
-#include <nix/expr/primops.hh>
-#include <nix/fetchers/filtering-source-accessor.hh>
-#include <nix/store/globals.hh>
-#include <nix/util/configuration.hh>
-#include <nix/util/config-global.hh>
-
-//#include "nix-crypto/src/cxx_shared.rs.h"
 #include "nix-crypto/include/nix_crypto.hh"
 #include "nix-crypto/src/cxx_bridge.rs.h"
 
@@ -105,18 +96,28 @@ CryptoNixPrimops::CryptoNixPrimops()
         .arity = 0,
         .fun = primop_openssl
     })
-    , cryptoNix(cryptonix_with_directory("")) {}
+    , cryptoNixSettings()
+    , registerCryptoNixSettings(&cryptoNixSettings) {}
+
+rust::Box<CryptoNix>& CryptoNixPrimops::cryptoNix() noexcept {
+
+    if(!cryptoNixPtr) {
+        cryptoNixPtr = std::make_unique<rust::Box<CryptoNix>>(
+            cryptonix_with_settings(cryptoNixSettings.extraCryptoNixArgs)
+        );
+    }
+
+    return *cryptoNixPtr;
+}
 
 std::string CryptoNixPrimops::openssl_public_key_pem(OpensslPrivateKeyIdentity&& key_identity) {
 
     return std::string(
-        cryptoNix->cxx_openssl_private_key(key_identity)->public_pem().c_str()
+        cryptoNix()->cxx_openssl_private_key(key_identity)->public_pem().c_str()
     );
 }
 
-CryptoNixPrimops::~CryptoNixPrimops() {
-    cryptonix_destroy(cryptoNix);
-}
+CryptoNixPrimops::~CryptoNixPrimops() {}
 
 void init_primops() {
     primops = std::make_unique<CryptoNixPrimops>();
