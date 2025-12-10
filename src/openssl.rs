@@ -1,12 +1,14 @@
-use crate::foundations::{CryptoNix, CryptoStore, CryptoStoreExtensions, IsCryptoStoreKey, Error};
-use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
 use openssl::sha;
+
+use crate::error::{Error};
+use crate::foundations::{CryptoNix, CryptoStore, CryptoStoreExtensions, IsCryptoStoreKey};
+use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
 
 pub mod pkey {
     use openssl::pkey::{Public, Private};
     use openssl::rsa;
 
-    use crate::foundations::{Error};
+    use crate::error::{Error};
 
     #[repr(u8)]
     pub enum Type {
@@ -17,7 +19,7 @@ pub mod pkey {
 
         fn from(value: u8) -> Type {
 
-            if(value == Type::RsaKey as u8) {
+            if value == Type::RsaKey as u8 {
                 return Type::RsaKey;
             }
             

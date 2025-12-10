@@ -1,62 +1,8 @@
-use core::str;
-use openssl::error::{ErrorStack};
 use std::borrow::{Borrow};
 use std::collections::{HashMap};
-use std::fmt;
-use std::string;
 
-pub enum Error {
-    OpensslError(ErrorStack),
-    CxxError(String),
-    Utf8Error(str::Utf8Error),
-    FromUtf8Error(string::FromUtf8Error),
-    SledError(sled::Error),
-    CryptoNixError(String)
-}
-
-impl From<sled::Error> for Error {
-    fn from(e: sled::Error) -> Error {
-        Error::SledError(e)
-    }
-}
-
-impl From<ErrorStack> for Error {
-    fn from(e: ErrorStack) -> Error {
-        Error::OpensslError(e)
-    }
-}
-
-impl From<str::Utf8Error> for Error {
-    fn from(e: str::Utf8Error) -> Error {
-        Error::Utf8Error(e)
-    }
-}
-
-impl From<string::FromUtf8Error> for Error {
-    fn from(e: string::FromUtf8Error) -> Error {
-        Error::FromUtf8Error(e)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
-        match self {
-            Error::OpensslError(stack) => stack.fmt(f),
-            Error::CxxError(msg) => write!(f, "{}", msg),
-            Error::Utf8Error(msg) => msg.fmt(f),
-            Error::FromUtf8Error(msg) => msg.fmt(f),
-            _ => write!(f, "Unknown error in the 'nix-crypto' Rust code.")
-        }
-    }
-}
-
-impl Error {
-
-    pub fn fail_with<T>(msg: String) -> Result<T, Error> {
-        Err(Error::CryptoNixError(msg))
-    }
-}
+use crate::args::{CryptoNixArgs};
+use crate::error::*;
 
 pub trait IsCryptoStoreKey {
     fn into_crypto_store_key(&self, salt: &[u8]) -> Vec<u8>;
@@ -173,12 +119,18 @@ impl CryptoNix {
         self.store.salt()
     }
 
-    pub fn with_directory(path : &str) -> CryptoNix {
+    fn from_parsed_args(args: &CryptoNixArgs) -> CryptoNix {
+        panic!("not ready")
 
+        /*
         match SledStore::open(path) {
             Ok(store) => CryptoNix{ store : Box::new(store) },
             Err(err) => CryptoNix::with_error(err)
-        }
+        }*/
+    }
+
+    pub fn with_args(args: &str) -> CryptoNix {
+        Self::from_parsed_args(&CryptoNixArgs::from_args(args))
     }
 
     pub fn with_error(error: Error) -> CryptoNix {

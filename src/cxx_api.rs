@@ -1,8 +1,9 @@
-use cxx::{CxxString, let_cxx_string};
+use cxx::{CxxString};
 use std::boxed::{Box};
 
 use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
-use crate::foundations::{CryptoNix, Error};
+use crate::error::{Error};
+use crate::foundations::{CryptoNix};
 
 pub fn rust_add(left: u64, right: u64) -> u64 {
     left + right
@@ -14,23 +15,16 @@ pub fn rust_add(left: u64, right: u64) -> u64 {
 /// an instance of cryptonix configured with the given parameters.
 pub fn cryptonix_with_settings(params: &CxxString) -> Box<CryptoNix> {
 
-    let utf8_error = "The path provided to cryptonix is not a valid utf-8 string";
+    let utf8_error = "Unexpected error in CryptoNix. The arguments supplied are not a valid utf-8 string. Please report this bug!";
 
-    match (*params).to_str() {
+    match params.to_str() {
         Ok(rust_params) => {
-            panic!("I did not like the paramters {}", rust_params);
-            Box::new(CryptoNix::with_directory(rust_params))
+            Box::new(CryptoNix::with_args(rust_params))
         },
         Err(_err) =>
             Box::new(CryptoNix::with_error(Error::CxxError(utf8_error.to_string())))
     }
 }
-
-/// Destroy the 'CryptoNix' instance. This function simply
-/// takes ownership of the 'CryptoNix' instance which
-/// results in it being dropped when the function
-/// returns.
-pub fn cryptonix_destroy(cryptonix: Box<CryptoNix>) {}
 
 pub type OpensslPrivateKey = crate::openssl::pkey::Key;
 
