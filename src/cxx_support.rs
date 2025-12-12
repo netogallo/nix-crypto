@@ -2,6 +2,11 @@ use core::option::{Option};
 
 use crate::error::*;
 
+/// This trait is meant to tag values that might be used as an
+/// option in C++. This is here because the 'cxx' crate does
+/// not natively support the 'Option' type. In the event that
+/// the option has not been correctly encoded within the
+/// value, an error should be raised.
 pub trait CxxTryOption<T> {
     fn try_option(self: Self) -> Result<Option<T>, Error>;
 }

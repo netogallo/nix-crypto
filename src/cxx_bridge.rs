@@ -59,7 +59,8 @@ pub mod ffi {
         /// identity purposes, the order in which they are defined
         /// does not matter. Furthermore, duplicate keys are not
         /// allowed.
-        ca_name: Vec<X509NameItem>,
+        issuer_name: Vec<X509NameItem>,
+        subject_name: Vec<X509NameItem>,
         /// The serial of the certificate
         serial: u64,
         /// The starting day of the certificate's validity. Note
