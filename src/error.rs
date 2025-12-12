@@ -6,6 +6,7 @@ use std::string;
 /// The type used to represent errors that occur
 /// within the 'CryptoNix' crate. All functions
 /// that can fail will fail with this error type.
+#[derive(Clone)]
 pub enum Error {
     OpensslError(ErrorStack),
     CxxError(String),
@@ -47,6 +48,7 @@ impl fmt::Display for Error {
             Error::CxxError(msg) => write!(f, "{}", msg),
             Error::Utf8Error(msg) => msg.fmt(f),
             Error::FromUtf8Error(msg) => msg.fmt(f),
+            Error::CryptoNixError(msg) => msg.fmt(f),
             _ => write!(f, "Unknown error in the 'nix-crypto' Rust code.")
         }
     }

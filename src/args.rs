@@ -28,6 +28,15 @@ const K_MODE : &str = "mode";
 const K_STORE_PATH : &str = "store-path";
 const K_FILESYSTEM_MODE : &str = "filesystem";
 
+const K_USAGE : &str = r#"
+CryptoNix needs to be configured in order to be used. This
+is chieved by using the "--option extra-cryptonix-args" flag
+when running nix. The options supplied via this flag
+are key/value sets formatted like "key1=value1&key2=value2".
+Below is a concrete example:
+    nix --option extra-cryptonix-args "mode=filesystem&store-path=/tmp/secrets"
+"#;
+
 /// Configuration representing the mode which uses
 /// the 'sled' crate to store credentials. This
 /// mode requries a path as input which determines
@@ -35,7 +44,7 @@ const K_FILESYSTEM_MODE : &str = "filesystem";
 /// must be used with care as the credentials are
 /// stored unencrypted at the specified location.
 pub struct SledModeConfig {
-    store_path : String
+    pub store_path : String
 }
 
 impl SledModeConfig {
@@ -79,7 +88,7 @@ pub enum CryptoNixMode {
 /// from the args supplied via the command line which get
 /// parsed using the 'parse_args' function.
 pub struct CryptoNixArgs {
-    mode : CryptoNixMode
+    pub mode : CryptoNixMode
 }
 
 impl CryptoNixArgs {
@@ -95,7 +104,7 @@ impl CryptoNixArgs {
     fn from_args_with_error(query: &str) -> Result<CryptoNixArgs, Error> {
 
         let args = parse_args(query);
-        let mode = &args.get(K_MODE).ok_or(Error::from_message(format!("The '{}' option is not present in the CryptoNix parameters.", K_MODE)))?;
+        let mode = &args.get(K_MODE).ok_or(Error::from_message(format!("The '{}' option is not present in the CryptoNix parameters.\n{}", K_MODE, K_USAGE)))?;
 
         if mode.len() == 0 {
             return Error::fail_with(

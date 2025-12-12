@@ -1,7 +1,7 @@
 use std::borrow::{Borrow};
 use std::collections::{HashMap};
 
-use crate::args::{CryptoNixArgs};
+use crate::args::{CryptoNixArgs, CryptoNixMode, SledModeConfig};
 use crate::error::*;
 
 pub trait IsCryptoStoreKey {
@@ -14,7 +14,7 @@ pub trait IsCryptoStoreKey {
 /// symmetric keys, amoong other things.
 pub trait CryptoStore {
     fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error>;
-    fn put_raw(&self, key: &[u8], value: &Vec<u8>) -> Result<(), Error>;
+    fn put_raw(&self, key: &[u8], value: Vec<u8>) -> Result<(), Error>;
 
     /// This function should return a salt that 'CryptoNix' will use
     /// to hash values. The salt is expected to be unique per store instance
@@ -33,6 +33,13 @@ pub trait CryptoStoreExtensions {
 /// be initialized. Instead, functions using the
 /// store will produce an error.
 struct ErrorStore {
+    error: Error
+}
+
+impl ErrorStore {
+    pub fn from_error(error: Error) -> ErrorStore {
+        ErrorStore { error: error }
+    }
 }
 
 // Todo: A salt should be generated upon the store initialization
@@ -42,11 +49,11 @@ static SALT : &[u8] = "72d12af4-adf5-42f6-938f-d504210d5492".as_bytes();
 impl CryptoStore for ErrorStore {
 
     fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        panic!("Not implemented")
+        Err(self.error.clone())
     }
 
-    fn put_raw(&self, key: &[u8], value: &Vec<u8>) -> Result<(), Error> {
-        panic!("Not implemented")
+    fn put_raw(&self, key: &[u8], value: Vec<u8>) -> Result<(), Error> {
+        Err(self.error.clone())
     }
 
     fn salt(&self) -> Vec<u8> {
@@ -63,11 +70,19 @@ struct SledStore {
 impl CryptoStore for SledStore {
 
     fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        panic!("Not implemented")
+        let value = self.sled_db.get(key)?;
+        Ok(
+            value.map(|iv| iv.to_vec())
+        )
     }
 
-    fn put_raw(&self, key: &[u8], value: &Vec<u8>) -> Result<(), Error> {
-        panic!("Not implemented")
+    fn put_raw(&self, key: &[u8], value: Vec<u8>) -> Result<(), Error> {
+
+        if self.sled_db.contains_key(key)? {
+            return Error::fail_with("Bug in CryptoNix. An attempt was made to replace an existing key in the store. Please report this issue.".to_string());
+        }
+        let _ = self.sled_db.insert(key, value)?;
+        Ok(())
     }
 
     fn salt(&self) -> Vec<u8> {
@@ -111,7 +126,7 @@ impl CryptoNix {
     where Vec<u8> : for<'a> TryFrom<&'a V, Error = Error> {
         self.store.put_raw(
             &key.into_crypto_store_key(&self.salt()[..])[..],
-            &Vec::try_from(value)?
+            Vec::try_from(value)?
         )
     }
 
@@ -119,23 +134,35 @@ impl CryptoNix {
         self.store.salt()
     }
 
-    fn from_parsed_args(args: &CryptoNixArgs) -> CryptoNix {
-        panic!("not ready")
+    fn from_sled_config(config: &SledModeConfig) -> CryptoNix {
 
-        /*
-        match SledStore::open(path) {
-            Ok(store) => CryptoNix{ store : Box::new(store) },
-            Err(err) => CryptoNix::with_error(err)
-        }*/
+        match SledStore::open(&config.store_path) {
+            Ok(store) => CryptoNix { store: Box::new(store) },
+            Err(err) => Self::with_error(err)
+        }
     }
 
+    fn from_parsed_args(args: CryptoNixArgs) -> CryptoNix {
+
+        match args.mode {
+            CryptoNixMode::SledMode(sled) => Self::from_sled_config(&sled),
+            CryptoNixMode::ErrorMode(err) => Self::with_error(err)
+        }
+    }
+
+    /// Parse the arguments and build a CryptoNix instance
+    /// based on said argumetns. If the arguments cannot be parsed,
+    /// an instance will be constructed which will fail on every
+    /// operation. CryptoNix, in general, uses this approach to allow
+    /// enabling the plugin systemwide and not having nix crash
+    /// if invoked w/o parameters.
     pub fn with_args(args: &str) -> CryptoNix {
-        Self::from_parsed_args(&CryptoNixArgs::from_args(args))
+        Self::from_parsed_args(CryptoNixArgs::from_args(args))
     }
 
     pub fn with_error(error: Error) -> CryptoNix {
         CryptoNix{
-            store : Box::new(ErrorStore{})
+            store : Box::new(ErrorStore::from_error(error))
         }
     }
 }
