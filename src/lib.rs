@@ -8,6 +8,7 @@ mod openssl;
 mod cxx_api;
 mod cxx_bridge;
 mod cxx_support;
+mod store;
 
 use crate::cxx_bridge::ffi;
 

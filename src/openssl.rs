@@ -1,17 +1,20 @@
 use openssl::pkey::{Public, Private, PKey};
-use openssl::sha;
 use openssl::x509::{X509, X509Builder};
 
 use crate::error::{Error};
-use crate::foundations::{CryptoNix, CryptoStore, CryptoStoreExtensions, IsCryptoStoreKey};
+use crate::foundations::{CryptoNix};
 use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams};
 use crate::cxx_support::{CxxTryOption};
+use crate::store::{IsCryptoStoreKey};
 
 pub mod pkey {
     use openssl::pkey::{PKey, PKeyRef, Public, Private};
     use openssl::rsa;
+    use openssl::sha;
 
+    use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
     use crate::error::{Error};
+    use crate::store::{IsCryptoStoreKey};
 
     #[repr(u8)]
     pub enum Type {
@@ -97,35 +100,28 @@ pub mod pkey {
         }
     }
 
-    impl TryFrom<&Vec<u8>> for Key {
-        type Error = Error;
-
-        fn try_from(value: &Vec<u8>) -> Result<Key, Error> {
-            let result = Key::from_openssl_pkey(
-                PKey::private_key_from_pem(&value[..])?
-            );
-            Ok(result)
+    impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
+        type Value = Key;
+    
+        fn to_store_key_raw(&self, salt: &[u8]) -> Vec<u8> {
+            let mut hasher = sha::Sha256::new();
+            hasher.update(salt);
+            hasher.update(self.key_type.as_bytes());
+            hasher.update(self.key_id.as_bytes());
+            Vec::from(hasher.finish())
         }
-    }
-
-    impl TryFrom<&Key> for Vec<u8> {
-        type Error = Error;
-
-        fn try_from(value: &Key) -> Result<Vec<u8>, Error> {
+    
+        fn to_store_value_raw(value: &Key) -> Result<Vec<u8>, Error> {
             let result = value.pkey.private_key_to_pem_pkcs8()?;
             Ok(result)
         }
-    }
-}
-
-impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
-
-    fn into_crypto_store_key(&self, salt: &[u8]) -> Vec<u8> {
-        let mut hasher = sha::Sha256::new();
-        hasher.update(salt);
-        hasher.update(self.key_type.as_bytes());
-        hasher.update(self.key_id.as_bytes());
-        Vec::from(hasher.finish())
+    
+        fn from_store_value_raw(bytes: &Vec<u8>) -> Result<Key, Error> {
+            let result = Key::from_openssl_pkey(
+                PKey::private_key_from_pem(&bytes[..])?
+            );
+            Ok(result)
+        }
     }
 }
 
