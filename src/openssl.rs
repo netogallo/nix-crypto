@@ -1,9 +1,15 @@
+use openssl::asn1::{Asn1Time};
+use openssl::bn::{BigNum};
 use openssl::pkey::{Public, Private, PKey};
-use openssl::x509::{X509, X509Name, X509NameBuilder, X509Builder};
+use openssl::x509::{X509, X509Extension, X509Name, X509NameBuilder, X509Builder};
+use openssl::x509::extension::{KeyUsage, BasicConstraints};
+
+use time::{UtcDateTime};
+use time::format_description::well_known::{Rfc3339};
 
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
-use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams, X509NameItem};
+use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams, X509NameItem, X509KeyUsage};
 use crate::cxx_support::{CxxTryOption};
 use crate::store::{IsCryptoStoreKey};
 
@@ -125,6 +131,28 @@ pub mod pkey {
     }
 }
 
+impl X509KeyUsage {
+
+    pub fn build(&self) -> Result<X509Extension, Error> {
+
+        let mut builder = KeyUsage::new();
+
+        if self.critical {
+            builder.critical();
+        }
+
+        if self.key_cert_sign {
+            builder.key_cert_sign();
+        }
+
+        if self.crl_sign {
+            builder.crl_sign();
+        }
+
+        Ok(builder.build()?)
+    }
+}
+
 impl X509BuildParams {
 
     fn name_from_entries(entries: &Vec<X509NameItem>) -> Result<X509Name, Error> {
@@ -156,6 +184,25 @@ impl X509BuildParams {
 
     pub fn build_subject_name(&self) -> Result<X509Name, Error> {
         Self::name_from_entries(&self.subject_name)
+    }
+
+    fn parse_date(date: &str) -> Result<Asn1Time, Error> {
+        let utc = UtcDateTime::parse(date, &Rfc3339)?;
+        Ok(Asn1Time::from_unix(utc.unix_timestamp())?)
+    }
+
+    pub fn start_date_as_asn1(&self) -> Result<Asn1Time, Error> {
+        Self::parse_date(&self.start_date)
+    }
+
+    pub fn expiry_date_as_asn1(&self) -> Result<Asn1Time, Error> {
+        Self::parse_date(&self.expiry_date)
+    }
+
+    pub fn build_key_usage_ext(&self) -> Result<Option<X509Extension>, Error> {
+        self.extension_key_usage.try_option()?
+            .map(|e| e.build())
+            .transpose()
     }
 }
 
@@ -205,6 +252,36 @@ impl CryptoNix {
         builder.set_pubkey(&subject_key)?;
         builder.set_issuer_name(&issuer_name)?;
         builder.set_subject_name(&subject_name)?;
+
+        let serial = BigNum::from_u32(params.serial)?.to_asn1_integer()?;
+        builder.set_serial_number(&serial)?;
+
+        let start_date = params.start_date_as_asn1()?;
+        let expiry_date = params.expiry_date_as_asn1()?;
+        builder.set_not_before(&start_date)?;
+        builder.set_not_after(&expiry_date)?;
+
+        params.build_key_usage_ext()?
+            .map(|e| builder.append_extension(e))
+            .transpose()?;
+        /*
+
+    // Extensions
+    builder.append_extension(BasicConstraints::new().critical().ca().build()?)?;
+    builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build()?)?;
+    builder.append_extension(
+        SubjectKeyIdentifier::new().build(&builder.x509v3_context(None, None))?,
+    )?;
+    builder.append_extension(
+        AuthorityKeyIdentifier::new()
+            .keyid(true)
+            .build(&builder.x509v3_context(None, None))?,
+    )?;
+
+    builder.sign(&ca_key, MessageDigest::sha256())?;
+
+    Ok((ca_key, builder.build()))
+    */
         panic!("not implementedd")
     }
 }

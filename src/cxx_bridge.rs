@@ -62,14 +62,14 @@ pub mod ffi {
         issuer_name: Vec<X509NameItem>,
         subject_name: Vec<X509NameItem>,
         /// The serial of the certificate
-        serial: u64,
-        /// The starting day of the certificate's validity. Note
-        /// that this will be parsed into a proper 'Date', therefore the
-        /// format does not matter for identity purposes.
+        serial: u32,
+        /// The starting day of the certificate's validity. This must
+        /// be a string in the "RFC3339" format. Note that this is required
+        /// as "now" cannot be used to mantain the function pure.
         start_date: String,
-        /// The expirly date of the certificate. Note that this
-        /// will be parsed into a propoer 'Date', therefore the format
-        /// does not matter for identity purposes.
+        /// The expiry date of the certificate. This must
+        /// be a string in the "RFC3339" format. Note that this is required
+        /// as "now" cannot be used to mantain the function pure.
         expiry_date: String,
         /// This controls the parameters related to the
         /// 'openssl::x509::extension::KeyUsage' extension.

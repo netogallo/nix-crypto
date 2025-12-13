@@ -13,7 +13,14 @@ pub enum Error {
     Utf8Error(str::Utf8Error),
     FromUtf8Error(string::FromUtf8Error),
     SledError(sled::Error),
-    CryptoNixError(String)
+    CryptoNixError(String),
+    TimeParseError(time::error::Parse)
+}
+
+impl From<time::error::Parse> for Error {
+    fn from(e: time::error::Parse) -> Error {
+        Error::TimeParseError(e)
+    }
 }
 
 impl From<sled::Error> for Error {
