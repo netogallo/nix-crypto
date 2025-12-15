@@ -1,15 +1,18 @@
 use openssl::asn1::{Asn1Time};
 use openssl::bn::{BigNum};
+use openssl::hash::{MessageDigest};
 use openssl::pkey::{Public, Private, PKey};
-use openssl::x509::{X509, X509Extension, X509Name, X509NameBuilder, X509Builder};
-use openssl::x509::extension::{KeyUsage, BasicConstraints};
+use openssl::x509::{X509, X509Extension, X509Name, X509NameBuilder
+    , X509Builder};
+use openssl::x509::extension::{AuthorityKeyIdentifier, KeyUsage, BasicConstraints
+    , SubjectKeyIdentifier};
 
 use time::{UtcDateTime};
 use time::format_description::well_known::{Rfc3339};
 
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
-use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams, X509NameItem, X509KeyUsage};
+use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams, X509NameItem, X509KeyUsage, X509BasicConstraints};
 use crate::cxx_support::{CxxTryOption};
 use crate::store::{IsCryptoStoreKey};
 
@@ -72,7 +75,7 @@ pub mod pkey {
     /// of this struct is to provide an API that can be used
     /// in C++ code.
     pub struct Key {
-        pkey: PKey<Private>
+        pub pkey: PKey<Private>
     }
 
     impl Key {
@@ -131,6 +134,32 @@ pub mod pkey {
     }
 }
 
+pub mod x509 {
+    use openssl::x509::{X509};
+
+    use crate::error::{Error};
+
+    /// This is a wrapper tipe for the 'X509' type defined in the
+    /// 'openssl' crate. The main purpose of this type is to
+    /// expose methods which can be invoked from C++ code.
+    pub struct X509Certificate {
+        pub certificate: X509
+    }
+
+    impl X509Certificate {
+
+        pub fn new(cert: X509) -> Self {
+            X509Certificate { certificate: cert }
+        }
+
+        pub fn public_pem(&self) -> Result<String, Error> {
+            let pem = self.certificate.to_pem()?;
+            let result = String::from_utf8(pem)?;
+            Ok(result)
+        }
+    }
+}
+
 impl X509KeyUsage {
 
     pub fn build(&self) -> Result<X509Extension, Error> {
@@ -147,6 +176,24 @@ impl X509KeyUsage {
 
         if self.crl_sign {
             builder.crl_sign();
+        }
+
+        Ok(builder.build()?)
+    }
+}
+
+impl X509BasicConstraints {
+
+    pub fn build(&self) -> Result<X509Extension, Error> {
+
+        let mut builder = BasicConstraints::new();
+
+        if self.critical {
+            builder.critical();
+        }
+
+        if self.ca {
+            builder.ca();
         }
 
         Ok(builder.build()?)
@@ -199,8 +246,20 @@ impl X509BuildParams {
         Self::parse_date(&self.expiry_date)
     }
 
+    /// Convert the key usage declarations specified in the CXX struct
+    /// into a 'X509Extension' which can be applied when building
+    /// a 'X509' certificate.
     pub fn build_key_usage_ext(&self) -> Result<Option<X509Extension>, Error> {
         self.extension_key_usage.try_option()?
+            .map(|e| e.build())
+            .transpose()
+    }
+
+    /// Convert the basic constraints that have been declared in the
+    /// CXX call into a 'X509Extension', which can be applied when building
+    /// a 'X509' certificate.
+    pub fn build_basic_constraints_ext(&self) -> Result<Option<X509Extension>, Error> {
+        self.extension_basic_constraints.try_option()?
             .map(|e| e.build())
             .transpose()
     }
@@ -229,10 +288,10 @@ impl CryptoNix {
         }
     }
 
-    pub fn openssl_x509_cert(
+    pub fn openssl_x509_certificate(
         &self,
         params: &X509BuildParams
-    ) -> Result<X509, Error> {
+    ) -> Result<x509::X509Certificate, Error> {
 
         let signing_key = self.openssl_private_key(&params.signing_private_key_identity)?;
 
@@ -264,24 +323,23 @@ impl CryptoNix {
         params.build_key_usage_ext()?
             .map(|e| builder.append_extension(e))
             .transpose()?;
-        /*
 
-    // Extensions
-    builder.append_extension(BasicConstraints::new().critical().ca().build()?)?;
-    builder.append_extension(KeyUsage::new().critical().key_cert_sign().crl_sign().build()?)?;
-    builder.append_extension(
-        SubjectKeyIdentifier::new().build(&builder.x509v3_context(None, None))?,
-    )?;
-    builder.append_extension(
-        AuthorityKeyIdentifier::new()
-            .keyid(true)
-            .build(&builder.x509v3_context(None, None))?,
-    )?;
+        params.build_basic_constraints_ext()?
+            .map(|e| builder.append_extension(e))
+            .transpose()?;
 
-    builder.sign(&ca_key, MessageDigest::sha256())?;
+        builder.append_extension(
+            SubjectKeyIdentifier::new().build(&builder.x509v3_context(None, None))?,
+        )?;
 
-    Ok((ca_key, builder.build()))
-    */
-        panic!("not implementedd")
+        builder.append_extension(
+            AuthorityKeyIdentifier::new()
+                .keyid(true)
+                .build(&builder.x509v3_context(None, None))?,
+        )?;
+
+        builder.sign(&signing_key.pkey, MessageDigest::sha256())?;
+
+        Ok(x509::X509Certificate::new(builder.build()))
     }
 }

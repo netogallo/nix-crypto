@@ -1,7 +1,7 @@
 use cxx::{CxxString};
 use std::boxed::{Box};
 
-use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
+use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams};
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
 
@@ -28,11 +28,18 @@ pub fn cryptonix_with_settings(params: &CxxString) -> Box<CryptoNix> {
 
 pub type OpensslPrivateKey = crate::openssl::pkey::Key;
 
+pub type OpensslX509Certificate = crate::openssl::x509::X509Certificate;
+
 impl CryptoNix {
 
     pub fn cxx_openssl_private_key(self: &CryptoNix, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<OpensslPrivateKey>, Error> {
 
         let key = self.openssl_private_key(&key_identity)?;
         Ok(Box::new(key))
+    }
+
+    pub fn cxx_openssl_x509_certificate(&self, args: X509BuildParams) -> Result<Box<OpensslX509Certificate>, Error> {
+        let result = self.openssl_x509_certificate(&args)?;
+        Ok(Box::new(result))
     }
 }

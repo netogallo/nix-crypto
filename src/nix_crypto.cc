@@ -1,3 +1,5 @@
+#include <format>
+
 #include "nix-crypto/include/nix_crypto.hh"
 #include "nix-crypto/src/cxx_bridge.rs.h"
 
@@ -66,6 +68,179 @@ static void primop_openssl_public_key_pem(EvalState& state, const PosIdx pos, Va
         );
         result.mkString(pem);
     } catch (rust::Error& e) {
+        state.error<EvalError>(e.what())
+            .atPos(pos)
+            .debugThrow();
+    }
+}
+
+static rust::Vec<rust::String> tryGetString(EvalState& state, const PosIdx pos, const std::string& key, Value& attrs) {
+
+    auto attr = attrs.attrs()->get(state.symbols.create(key));
+
+    if(attr) {
+        std::string value (
+            state.forceString(
+                *attr->value,
+                pos,
+                std::format("while reading the value of the attribute '{}'", key)
+            ).data()
+        );
+
+        return { rust::String(std::move(value)) };
+    }
+
+    return {};
+}
+
+const std::string K_BUILD_PARAMS_CRITICAL = "critical";
+const std::string K_BUILD_PARAMS_CA = "ca";
+
+static rust::Vec<X509BasicConstraints> tryGetBasicConstraints(EvalState& state, const PosIdx pos, const std::string& key, Value& attrs) {
+
+    auto attr = attrs.attrs()->get(state.symbols.create(key));
+
+    if(!attr) {
+        return {};
+    }
+
+    auto& value = *attr->value;
+    state.forceAttrs(
+        value,
+        pos,
+        std::format("expected the 'x509 basic constraints' extension, provided under the attribute {}, to be an attribute set.", key)
+    );
+
+    auto criticalAttr = value.attrs()->get(state.symbols.create(K_BUILD_PARAMS_CRITICAL));
+    bool critical = false;
+
+    if(criticalAttr) {
+        critical = state.forceBool(
+            *criticalAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the 'x509 basic constraints' must be a bool", K_BUILD_PARAMS_CRITICAL)
+        );
+    }
+
+    auto caAttr = value.attrs()->get(state.symbols.create(K_BUILD_PARAMS_CA));
+    bool ca = false;
+
+    if(caAttr) {
+        ca = state.forceBool(
+            *caAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the 'x509 basic constraints' must be a bool", K_BUILD_PARAMS_CA)
+        );
+    }
+
+    return { X509BasicConstraints { .critical = critical, .ca = ca } };
+}
+    
+
+static rust::Vec<X509NameItem> asX509Name(EvalState& state, const PosIdx pos, Value& attrs) {
+
+    state.forceAttrs(attrs, pos, "expected the 'x509 name' to be represented as an attribute set of strings");
+    rust::Vec<X509NameItem> result;
+    result.reserve(attrs.attrs()->size());
+
+    for(auto attr : *attrs.attrs()) {
+        auto attrName = rust::String(std::string(state.symbols[attr.name]));
+        auto attrValue = rust::String(
+            state.forceString(
+                *attr.value,
+                pos,
+                std::format("expected the attributes of the 'X509 name' to be strings. The attribute '{}' is not a string.", attrName.data())
+            ).data()
+        );
+        result.emplace_back(attrName, attrValue);
+    }
+
+    return std::move(result);
+}
+
+const std::string K_SUBJECT_PUBLIC_KEY = "subject-public-key";
+const std::string K_SIGNING_PRIVATE_KEY_IDENTITY = "signing-private-key-identity";
+const std::string K_SUBJECT_NAME = "subject-name";
+const std::string K_SERIAL = "serial";
+const std::string K_START_DATE = "start-date";
+const std::string K_EXPIRY_DATE = "expiry-date";
+
+static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
+
+    state.forceAttrs(params, pos, "while evaluating the openssl build parameters to build an X509 certificate.");
+
+    auto subjectPublicKey = tryGetString(state, pos, K_SUBJECT_PUBLIC_KEY, params);
+    auto signingKey = openssl_get_private_key_identity(
+        state,
+        pos,
+        *state.getAttr(
+            state.symbols.create(K_SIGNING_PRIVATE_KEY_IDENTITY),
+            params.attrs(),
+            std::format("while accessing the '{}' attribute.", K_SIGNING_PRIVATE_KEY_IDENTITY)
+        )->value
+    );
+    auto subjectName =
+        asX509Name(
+            state,
+            pos,
+            *state.getAttr(
+                state.symbols.create(K_SUBJECT_NAME),
+                params.attrs(),
+                "A 'x509 subject name' must be provided as a attribute set of strings"
+            )->value
+        );
+    auto issuerName =
+        asX509Name(
+            state,
+            pos,
+            *state.getAttr(
+                state.symbols.create(K_SUBJECT_NAME),
+                params.attrs(),
+                "A 'x509 issuer name' must be provided as a attribute set of strings"
+            )->value
+        );
+
+    auto serial =
+        state.forceInt(
+            *state.getAttr(
+                state.symbols.create(K_SERIAL),
+                params.attrs(),
+                "A 'x509 serial' must be provided as an integer"
+            )->value,
+            pos,
+            std::format("A 'X509' serial must be provided as an int under the attribute {}", K_SERIAL)
+        );
+
+    auto startDate =
+        state.forceString(
+            *state.getAttr(
+                state.symbols.create(K_START_DATE),
+                params.attrs(),
+                "A starting date must be provided as a string formatted using the 'RFC 3339' standard."
+            )->value,
+            pos,
+            std::format("A starting date must be provided as a string formatted using the 'RFC 3339' standard under the '{}' attribute", K_START_DATE)
+        );
+
+    auto expiryDate =
+        state.forceString(
+            *state.getAttr(
+                state.symbols.create(K_EXPIRY_DATE),
+                params.attrs(),
+                "An expiry date must be provided as a string formatted using the 'RFC 3339' standard."
+            )->value,
+            pos,
+            std::format("A expiry date must be provided as a string formatted using the 'RFC 3339' standard under the '{}' attribute", K_START_DATE)
+        );
+
+}
+
+static void primop_openssl_x509_pem(EvalState& state, const PosIdx pos, Value** args, Value& result) {
+
+    try {
+        //auto x509 = primops->openssl_x509_certificate();
+        //result.mkString(x509->public_pem());
+    } catch(rust::Error& e) {
         state.error<EvalError>(e.what())
             .atPos(pos)
             .debugThrow();
