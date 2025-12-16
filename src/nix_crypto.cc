@@ -93,6 +93,61 @@ static rust::Vec<rust::String> tryGetString(EvalState& state, const PosIdx pos, 
     return {};
 }
 
+const std::string K_KEY_USAGE_CRITICAL = "critical";
+const std::string K_KEY_USAGE_CRL_SIGN = "crl-sign";
+const std::string K_KEY_USAGE_KEY_CERT_SIGN = "key-cert-sign";
+
+static rust::Vec<X509KeyUsage> tryGetKeyUsage(EvalState& state, const PosIdx pos, const std::string& key, Value& attrs) {
+
+    auto attr = attrs.attrs()->get(state.symbols.create(key));
+
+    if(!attr) {
+        return {};
+    }
+
+    auto& value = *attr->value;
+    state.forceAttrs(
+        value,
+        pos,
+        std::format("expected the 'x509 key constraints' extension to be an attribute set as the attribute '{}' of the parameters.", key)
+    );
+
+    auto criticalAttr = value.attrs()->get(state.symbols.create(K_KEY_USAGE_CRITICAL));
+    bool critical = false;
+
+    if(criticalAttr) {
+        critical = state.forceBool(
+            *criticalAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the 'x509 key usage' must be a bool", K_KEY_USAGE_CRITICAL)
+        );
+    }
+
+    auto keyCertSignAttr = value.attrs()->get(state.symbols.create(K_KEY_USAGE_KEY_CERT_SIGN));
+    bool keyCertSign = false;
+
+    if(criticalAttr) {
+        keyCertSign = state.forceBool(
+            *criticalAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the 'x509 key usage' must be a bool", K_KEY_USAGE_KEY_CERT_SIGN)
+        );
+    }
+
+    auto crlSignAttr = value.attrs()->get(state.symbols.create(K_KEY_USAGE_CRL_SIGN));
+    auto crlSign = false;
+
+    if(crlSignAttr) {
+        crlSign = state.forceBool(
+            *crlSignAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the 'x509 key usage' must be a bool", K_KEY_USAGE_CRL_SIGN)
+        );
+    }
+
+    return { { .critical = critical, .key_cert_sign = keyCertSign, .crl_sign = crlSign} };
+}
+
 const std::string K_BUILD_PARAMS_CRITICAL = "critical";
 const std::string K_BUILD_PARAMS_CA = "ca";
 
@@ -164,6 +219,7 @@ const std::string K_SUBJECT_NAME = "subject-name";
 const std::string K_SERIAL = "serial";
 const std::string K_START_DATE = "start-date";
 const std::string K_EXPIRY_DATE = "expiry-date";
+const std::string K_BASIC_CONSTRAINTS = "basic-constraints";
 
 static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
 
@@ -232,6 +288,8 @@ static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
             pos,
             std::format("A expiry date must be provided as a string formatted using the 'RFC 3339' standard under the '{}' attribute", K_START_DATE)
         );
+
+    auto basicConstraints = tryGetBasicConstraints(state, pos, K_BASIC_CONSTRAINTS, params);
 
 }
 
