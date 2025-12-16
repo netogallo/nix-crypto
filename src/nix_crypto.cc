@@ -220,8 +220,9 @@ const std::string K_SERIAL = "serial";
 const std::string K_START_DATE = "start-date";
 const std::string K_EXPIRY_DATE = "expiry-date";
 const std::string K_BASIC_CONSTRAINTS = "basic-constraints";
+const std::string K_KEY_USAGE = "key-usage";
 
-static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
+static X509BuildParams toX509Params(EvalState& state, const PosIdx pos, Value& params) {
 
     state.forceAttrs(params, pos, "while evaluating the openssl build parameters to build an X509 certificate.");
 
@@ -256,7 +257,7 @@ static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
             )->value
         );
 
-    auto serial =
+    int serial =
         state.forceInt(
             *state.getAttr(
                 state.symbols.create(K_SERIAL),
@@ -265,7 +266,7 @@ static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
             )->value,
             pos,
             std::format("A 'X509' serial must be provided as an int under the attribute {}", K_SERIAL)
-        );
+        ).value;
 
     auto startDate =
         state.forceString(
@@ -276,7 +277,7 @@ static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
             )->value,
             pos,
             std::format("A starting date must be provided as a string formatted using the 'RFC 3339' standard under the '{}' attribute", K_START_DATE)
-        );
+        ).data();
 
     auto expiryDate =
         state.forceString(
@@ -287,17 +288,32 @@ static void toX509Params(EvalState& state, const PosIdx pos, Value& params) {
             )->value,
             pos,
             std::format("A expiry date must be provided as a string formatted using the 'RFC 3339' standard under the '{}' attribute", K_START_DATE)
-        );
+        ).data();
 
     auto basicConstraints = tryGetBasicConstraints(state, pos, K_BASIC_CONSTRAINTS, params);
 
+    auto keyUsage = tryGetKeyUsage(state, pos, K_KEY_USAGE, params);
+
+    return {
+        .subject_public_key = std::move(subjectPublicKey),
+        .signing_private_key_identity = std::move(signingKey),
+        .issuer_name = std::move(issuerName),
+        .subject_name = std::move(subjectName),
+        .serial = serial,
+        .start_date = rust::String(startDate),
+        .expiry_date = rust::String(expiryDate),
+        .extension_key_usage = std::move(keyUsage),
+        .extension_basic_constraints = std::move(basicConstraints)
+    };
 }
 
 static void primop_openssl_x509_pem(EvalState& state, const PosIdx pos, Value** args, Value& result) {
 
     try {
-        //auto x509 = primops->openssl_x509_certificate();
-        //result.mkString(x509->public_pem());
+        auto pem = primops->opensslX509Pem(
+            toX509Params(state, pos, *args[0])
+        );
+        result.mkString(pem);
     } catch(rust::Error& e) {
         state.error<EvalError>(e.what())
             .atPos(pos)
@@ -305,14 +321,25 @@ static void primop_openssl_x509_pem(EvalState& state, const PosIdx pos, Value** 
     }
 }
 
+constexpr const int OPENSSL_PRIMOPS_COUNT = 2;
+constexpr const std::string K_X509_PEM = "x509-pem";
+
 static void primop_openssl(EvalState& state, const PosIdx _pos, Value** _args, Value& result) {
 
-    auto attrs = state.buildBindings(1);
+    auto attrs = state.buildBindings(OPENSSL_PRIMOPS_COUNT);
+
     auto openssl_public_key_pem = state.symbols.create("public-key-pem");
     attrs.alloc(openssl_public_key_pem).mkPrimOp(new PrimOp {
         .name = "public-key-pem",
         .arity = 1,
         .fun = primop_openssl_public_key_pem
+    });
+
+    auto opensslX509Pem = state.symbols.create(K_X509_PEM);
+    attrs.alloc(opensslX509Pem).mkPrimOp(new PrimOp { 
+        .name = K_X509_PEM,
+        .arity = 1,
+        .fun = primop_openssl_x509_pem
     });
 
     result.mkAttrs(attrs);
@@ -347,6 +374,14 @@ std::string CryptoNixPrimops::openssl_public_key_pem(OpensslPrivateKeyIdentity&&
 
     return std::string(
         cryptoNix()->cxx_openssl_private_key(key_identity)->public_pem().c_str()
+    );
+}
+
+
+std::string CryptoNixPrimops::opensslX509Pem(X509BuildParams&& buildParams) {
+
+    return std::string(
+        cryptoNix()->cxx_openssl_x509_certificate(buildParams)->public_pem().c_str()
     );
 }
 

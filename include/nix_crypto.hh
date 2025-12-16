@@ -28,6 +28,7 @@ class CryptoNixPrimops {
   ~CryptoNixPrimops();
 
   std::string openssl_public_key_pem(OpensslPrivateKeyIdentity&& key_identity);
+  std::string opensslX509Pem(X509BuildParams&& buildParams);
 
   private:
   nix::RegisterPrimOp age;
