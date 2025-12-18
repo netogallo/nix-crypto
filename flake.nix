@@ -10,12 +10,12 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
         ./flakeModule.nix
+        ./tests-module/flakeModule.nix
         # To import an internal flake module: ./other.nix
         # To import an external flake module:
         #   1. Add foo to inputs
         #   2. Add foo as a parameter to the outputs function
         #   3. Add here: foo.flakeModule
-
       ];
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ];
       perSystem = { config, self', inputs', pkgs, system, ... }: {

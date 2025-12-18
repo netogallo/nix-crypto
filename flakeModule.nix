@@ -8,28 +8,30 @@ let
 in
 {
   options.perSystem = mkPerSystemOption ({ pkgs, config, ... }:
-    let
-      x = 4;
-    in
-      {
-        config.devShells.default =
-          pkgs.mkShell {
-            buildInputs =
-              with pkgs;
-              with pkgs.nixVersions.nixComponents_2_31; [
-                cmake
-                pkg-config
-                nix-store
-                nix-expr
-                nix-cmd
-                nix-fetchers
-                boost
-                cargo
-                nixVersions.nix_2_31
-              ]
-            ;
-          }
-        ;
-      }
+    {
+      config.tests = {
+        "It can run a simple test" = {
+          test = _: { success = true; message = ""; };
+        };
+      };
+      config.devShells.default =
+        pkgs.mkShell {
+          buildInputs =
+            with pkgs;
+            with pkgs.nixVersions.nixComponents_2_31; [
+              cmake
+              pkg-config
+              nix-store
+              nix-expr
+              nix-cmd
+              nix-fetchers
+              boost
+              cargo
+              nixVersions.nix_2_31
+            ]
+          ;
+        }
+      ;
+    }
   );
 }
