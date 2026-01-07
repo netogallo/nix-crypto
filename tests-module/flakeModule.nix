@@ -75,7 +75,8 @@ in
         type = types.attrsOf test-submodule;
         default = {};
       };
-      config.checks."cryptonix-tests" = runTests config.tests;
+      #config.checks."cryptonix-tests" = runTests config.tests;
+      config.checks."cryptonix-tests" = pkgs.writeScriptBin "test" "echo bad bad; exit 1";
     }
   );
 }

@@ -386,7 +386,6 @@ std::string CryptoNixPrimops::openssl_public_key_pem(OpensslPrivateKeyIdentity&&
     );
 }
 
-
 std::string CryptoNixPrimops::opensslX509Pem(X509BuildParams&& buildParams) {
 
     return std::string(
