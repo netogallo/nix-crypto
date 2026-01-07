@@ -5,7 +5,7 @@
 
 using namespace nix;
 
-std::unique_ptr<CryptoNixPrimops> primops;
+static std::unique_ptr<CryptoNixPrimops> primops = std::make_unique<CryptoNixPrimops>();
 
 static void primop_add(EvalState & state, const PosIdx pos, Value ** args, Value & v) {
 
@@ -345,16 +345,25 @@ static void primop_openssl(EvalState& state, const PosIdx _pos, Value** _args, V
     result.mkAttrs(attrs);
 }
 
+#define CRYPTO_PRIMOPS_COUNT 2
+
+static void primop_crypto(EvalState& state, const PosIdx pos, Value** args, Value& result) {
+    auto attrs = state.buildBindings(CRYPTO_PRIMOPS_COUNT);
+
+    Value& openssl = attrs.alloc(state.symbols.create("openssl"));
+    primop_openssl(state, pos, args, openssl);
+
+    Value& age = attrs.alloc(state.symbols.create("age"));
+    primop_age(state, pos, args, age);
+
+    result.mkAttrs(attrs);
+}
+
 CryptoNixPrimops::CryptoNixPrimops()
-    : age({
-      .name = "__age",
-      .arity = 0,
-      .fun = primop_age,
-    })
-    , openssl({
-        .name = "__openssl",
+    : crypto({
+        .name = "__crypto",
         .arity = 0,
-        .fun = primop_openssl
+        .fun = primop_crypto
     })
     , cryptoNixSettings()
     , registerCryptoNixSettings(&cryptoNixSettings) {}
@@ -387,10 +396,6 @@ std::string CryptoNixPrimops::opensslX509Pem(X509BuildParams&& buildParams) {
 
 CryptoNixPrimops::~CryptoNixPrimops() {}
 
-void init_primops() {
-    primops = std::make_unique<CryptoNixPrimops>();
-}
+void init_primops() {}
 
-void destroy_primops() {
-    primops.reset();
-}
+void destroy_primops() {}

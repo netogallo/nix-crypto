@@ -8,12 +8,16 @@ let
 in
 {
   options.perSystem = mkPerSystemOption ({ pkgs, config, ... }:
+  let
+    nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
+  in
     {
       config.tests = {
-        "It can run a simple test" = {
+        "Dummy test" = {
           test = _: { success = true; message = ""; };
         };
       };
+      config.packages = nix-crypto.packages;
       config.devShells.default =
         pkgs.mkShell {
           buildInputs =

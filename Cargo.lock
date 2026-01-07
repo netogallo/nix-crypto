@@ -815,6 +815,7 @@ dependencies = [
  "cxx-build",
  "libc",
  "openssl",
+ "pkg-config",
  "regex",
  "sled",
  "time",

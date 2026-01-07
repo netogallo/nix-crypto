@@ -31,8 +31,9 @@ class CryptoNixPrimops {
   std::string opensslX509Pem(X509BuildParams&& buildParams);
 
   private:
-  nix::RegisterPrimOp age;
-  nix::RegisterPrimOp openssl;
+  //nix::RegisterPrimOp age;
+  //nix::RegisterPrimOp openssl;
+  nix::RegisterPrimOp crypto;
   ExtraBuiltinsSettings cryptoNixSettings;
   nix::GlobalConfig::Register registerCryptoNixSettings;
 
