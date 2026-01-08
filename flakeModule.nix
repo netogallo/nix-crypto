@@ -11,6 +11,15 @@ in
   let
     nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
 
+    nix-crypto-dev = pkgs.writeScriptBin "nix-crypto" ''
+      STORE=$(mktemp -d)
+      nix \
+        --extra-experimental-features nix-command \
+        --option plugin-files "$PWD/target/debug/libnix_crypto.so" \
+        --option extra-cryptonix-args "mode=filesystem&store-path=$STORE" \
+        "$@"
+    '';
+
     # Utility command used to run the checks in the dev environment
     # using the library built with cargo. During dev, using
     # 'nix flake check' is slow as it must rebuild all rust dependencies
@@ -21,7 +30,7 @@ in
         --extra-experimental-features nix-command \
         --option plugin-files "$PWD/target/debug/libnix_crypto.so" \
         --option extra-cryptonix-args "mode=filesystem&store-path=$STORE" \
-        eval --impure --expr "import \"$PWD/test/main.nix\" {}"
+        eval --show-trace --impure --expr "import \"$PWD/test/main-dev.nix\" { pwd = \"$PWD\"; }"
     '';
   in
     {
@@ -31,6 +40,7 @@ in
           buildInputs =
             with pkgs;
             with pkgs.nixVersions.nixComponents_2_31; [
+              nix-crypto-dev
               test-dev
               cmake
               pkg-config
