@@ -17,7 +17,7 @@ let
         // (if cond || message == null then {} else { inherit message; })
       ;
       trace-force = debug:
-        if lib.all (x: x) (lib.attrValues (lib.mapAttrs (k: v: lib.typeOf k == lib.typeOf v) debug))
+        if lib.all id (lib.attrValues (lib.mapAttrs (k: v: lib.typeOf k == lib.typeOf v) debug))
         then builtins.trace debug
         else builtins.trace debug
       ;
@@ -43,10 +43,26 @@ let
       ;
     in
       {
+        strings = with lib.strings; {
+          has-prefix = prefix: value:
+            assert-main {
+              cond = (hasPrefix prefix value);
+              message = "String expected to have the prefix '${prefix}'";
+              debug = { inherit prefix value; };
+            }
+          ;
+        };
         is-string = value:
           assert-main {
             cond = (lib.typeOf value == "string");
             message = "Assertion failed, value expected to be a string";
+            debug = { inherit value; };
+          }
+        ;
+        is-int = value:
+          assert-main {
+            cond = (lib.typeOf value == "int");
+            message = "Assertion failed, value expecteed to be an int";
             debug = { inherit value; };
           }
         ;

@@ -78,19 +78,27 @@ static rust::Vec<rust::String> tryGetString(EvalState& state, const PosIdx pos, 
 
     auto attr = attrs.attrs()->get(state.symbols.create(key));
 
-    if(attr) {
-        std::string value (
-            state.forceString(
-                *attr->value,
-                pos,
-                std::format("while reading the value of the attribute '{}'", key)
-            ).data()
-        );
-
-        return { rust::String(std::move(value)) };
+    if(!attr || !attr->value) {
+        return {};
     }
 
-    return {};
+    Value& value = *attr->value;
+    state.forceValue(value, pos);
+
+    // Nulls are treated as the attribute being absent
+    if(value.type() == nNull) {
+        return {};
+    }
+
+    std::string result (
+        state.forceString(
+            value,
+            pos,
+            std::format("while reading the value of the attribute '{}'", key)
+        ).data()
+    );
+
+    return { rust::String(std::move(result)) };
 }
 
 const std::string K_KEY_USAGE_CRITICAL = "critical";
@@ -101,11 +109,18 @@ static rust::Vec<X509KeyUsage> tryGetKeyUsage(EvalState& state, const PosIdx pos
 
     auto attr = attrs.attrs()->get(state.symbols.create(key));
 
-    if(!attr) {
+    if(!attr || !attr->value) {
         return {};
     }
 
     auto& value = *attr->value;
+    state.forceValue(value, pos);
+
+    // Nulls are also treated as the attribute being absent
+    if(value.type() == nNull) {
+        return {};
+    }
+
     state.forceAttrs(
         value,
         pos,
@@ -160,6 +175,13 @@ static rust::Vec<X509BasicConstraints> tryGetBasicConstraints(EvalState& state, 
     }
 
     auto& value = *attr->value;
+    state.forceValue(value, pos);
+
+    // Nulls are treated as if the value were absent
+    if (value.type() == nNull) {
+        return {};
+    }
+
     state.forceAttrs(
         value,
         pos,
@@ -216,6 +238,7 @@ static rust::Vec<X509NameItem> asX509Name(EvalState& state, const PosIdx pos, Va
 const std::string K_SUBJECT_PUBLIC_KEY = "subject-public-key";
 const std::string K_SIGNING_PRIVATE_KEY_IDENTITY = "signing-private-key-identity";
 const std::string K_SUBJECT_NAME = "subject-name";
+const std::string K_ISSUER_NAME = "issuer-name";
 const std::string K_SERIAL = "serial";
 const std::string K_START_DATE = "start-date";
 const std::string K_EXPIRY_DATE = "expiry-date";
@@ -251,7 +274,7 @@ static X509BuildParams toX509Params(EvalState& state, const PosIdx pos, Value& p
             state,
             pos,
             *state.getAttr(
-                state.symbols.create(K_SUBJECT_NAME),
+                state.symbols.create(K_ISSUER_NAME),
                 params.attrs(),
                 "A 'x509 issuer name' must be provided as a attribute set of strings"
             )->value

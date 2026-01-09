@@ -1,11 +1,6 @@
-{ pkgs, prelude, ... }:
+{ pkgs, lib, ... }:
 let
-  inherit (pkgs) lib;
   inherit (lib) types;
-  inherit (builtins.crypto) openssl;
-  type-checker = prelude.type-checker {
-    file = "${./openssl.nix}";
-  };
   private-key-spec-type =
     types.submodule {
       options = {
@@ -45,28 +40,5 @@ let
       };
     }
   ;
-  to-key-identity = attrs:
-    let
-      keys = lib.sort (a: b: a < b) (lib.attrNames attrs);
-      mk-entry = k:
-        let
-          value = attrs.${k};
-        in
-          "${k}=${value}"
-      ;
-    in
-      lib.concatStringsSep "&" (lib.map mk-entry keys)
-  ;
-  private-key =
-    type-checker.function
-    [ { name = "key-spec"; type = private-key-spec-type; } ]
-    (key-spec:
-    {
-      public-key-pem = openssl.public-key-pem {
-        key-identity = to-key-identity key-spec.attrs;
-        key-type = key-spec.type;
-      };
-    })
-  ;
 in
-  { inherit private-key; }
+  private-key-spec-type

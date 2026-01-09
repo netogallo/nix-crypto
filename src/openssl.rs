@@ -101,10 +101,8 @@ pub mod pkey {
         }
 
         pub fn public_key(&self) -> Result<PKey<Public>, Error> {
-            let result = PKey::public_key_from_raw_bytes(
-                &self.pkey.raw_public_key()?[..],
-                self.pkey.id()
-            )?;
+	          let pem = self.pkey.public_key_to_pem()?;
+	          let result = PKey::public_key_from_pem(&pem)?;
             Ok(result)
         }
     }

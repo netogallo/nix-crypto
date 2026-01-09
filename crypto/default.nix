@@ -10,7 +10,7 @@ let
     in
       {
         prelude = self.callPackage ./prelude.nix {};
-        openssl = self.callPackage ./openssl.nix {};
+        openssl = self.callPackage ./openssl/default.nix {};
       }
   );
 in
