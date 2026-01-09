@@ -10,7 +10,6 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
         ./flakeModule.nix
-        ./tests-module/flakeModule.nix
         # To import an internal flake module: ./other.nix
         # To import an external flake module:
         #   1. Add foo to inputs

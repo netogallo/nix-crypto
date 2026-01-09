@@ -7,22 +7,57 @@ let
   id = x: x;
   success = { success = true; message = null; };
   fail = message: { success = false; inherit message; };
-  assert-main = cond: message:
-    if cond
-    then success
-    else fail message
+  trace-test = { name, cond, message, debug ? null }: result:
+    let
+      output =
+        {
+          test = name;
+          status = if cond then "Ok" else "Failed";
+        }
+        // (if cond || message == null then {} else { inherit message; })
+      ;
+      trace-force = debug:
+        if lib.all (x: x) (lib.attrValues (lib.mapAttrs (k: v: lib.typeOf k == lib.typeOf v) debug))
+        then builtins.trace debug
+        else builtins.trace debug
+      ;
+      trace-with-debug =
+        if debug == null
+        then (x: x)
+        else trace-force debug
+      ;
+    in
+      if cond
+      then trace-force output result
+      else trace-force output (trace-with-debug result)
   ;
-  _assert = rec {
-    is-string = value:
-    assert-main
-    (lib.typeOf value == "string")
-    "Assertion failed, value expected to be a string"
+  _assert = { name }:
+    let
+      assert-main = { cond, message, debug ? null }:
+        let
+          context = { inherit name cond message debug; };
+        in
+          if cond
+          then trace-test context success
+          else trace-test context (fail message)
+      ;
+    in
+      {
+        is-string = value:
+          assert-main {
+            cond = (lib.typeOf value == "string");
+            message = "Assertion failed, value expected to be a string";
+            debug = { inherit value; };
+          }
+        ;
+        __functor = self: cond: message: assert-main { inherit cond message; };
+      }
   ;
-    __functor = self: assert-main;
-  };
   run-test = name: test:
     let
-      context = { inherit _assert; };
+      context = {
+        _assert = _assert { inherit name; };
+      };
       result = test context;
     in
       if !(lib.hasAttr "success" result)
