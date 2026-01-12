@@ -23,7 +23,7 @@ let
       ;
       trace-with-debug =
         if debug == null
-        then (x: x)
+        then id
         else trace-force debug
       ;
     in
