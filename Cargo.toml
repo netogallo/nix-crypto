@@ -1,21 +1,6 @@
-[package]
-name = "nix-crypto"
-version = "0.1.0"
-edition = "2024"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-age = { version = "0.11", features = ["armor"] }
-libc = "0.2"
-openssl = "0.10"
-cxx = "1.0"
-ctor = "0.2"
-sled = "0.34"
-regex = "1.12.2"
-time = { version = "0.3.44", features = ["parsing"] }
-
-[build-dependencies]
-cxx-build = "1.0"
-pkg-config = "0.3.9"
+[workspace]
+members = [
+    "nix-crypto-core",
+    "nix-crypto-plugin",
+]
+resolver = "2" 
