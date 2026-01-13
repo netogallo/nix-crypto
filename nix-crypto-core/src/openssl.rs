@@ -16,92 +16,146 @@ use crate::foundations::{CryptoNix};
 use crate::cxx_support::{CxxTryOption};
 use crate::store::{IsCryptoStoreKey};
 
-#[cxx::bridge]
 pub mod ffi {
 
-    /// This struct defines a key identity for openssl. An identity
-    /// is simply an object that is able to reference a particular key.
-    /// In order to avoid exposing private keys in nix code (so they cannot
-    /// land in the store), nix code will provide an identity (rather than
-    /// the private key) to indicate what key is to be used to sign/encrypt
-    /// values.
-    pub struct OpensslPrivateKeyIdentity {
-        pub key_type: String,
-        pub key_id : String
+    pub trait IsOpensslPrivateKeyIdentity {
+        fn key_type(&self) -> String;
+        fn key_id(&self) -> String;
     }
 
-    pub struct X509NameItem {
-        pub entry_name: String,
-        pub entry_value: String
+    pub trait IsX509NameItem {
+        fn entry_name(&self) -> String;
+        fn entry_value(&self) -> String;
     }
 
-    pub struct X509KeyUsage {
-        pub critical: bool,
-        pub key_cert_sign: bool,
-        pub crl_sign: bool
+    pub trait IsX509KeyUsage {
+        fn critical(&self) -> bool;
+        fn key_cert_sign(&self) -> bool;
+        fn crl_sign(&self) -> bool;
     }
 
-    pub struct X509BasicConstraints {
-        pub critical: bool,
-        pub ca: bool
+    pub trait IsX509BasicConstraints {
+        fn critical(&self) -> bool; 
+        fn ca(&self) -> bool;
     }
 
-    /// This struct identifies a X509Certificate. Note that
-    /// each parameter has additional constraints. The expectation
-    /// is that the same set of parameters will result in the same
-    /// certificate accross multiple invocations.
-    pub struct X509BuildParams {
-        /// The public key asociated to the private key of
-        /// the certificate's subject. The value should be one
-        /// of the following:
-        /// * A Vec containing a *single* element which must be
-        ///   the key as a PEM encoded String
-        /// * An *empty* Vec. In this case, the certificate will
-        ///   be a "self-signed" certificate, meaning the public
-        ///   key associated to the signing key will be the
-        ///   certificate's subject's private key.
-        ///
-        /// Todo: Ideally, this should be an 'Option<String>' but
-        /// it seems that is not supported by the CXX crate.
-        pub subject_public_key: Vec<String>,
-        /// The private key that will be used to sign the certificate.
-        pub signing_private_key_identity: OpensslPrivateKeyIdentity,
-        /// The name components of the certificate. Note that for
-        /// identity purposes, the order in which they are defined
-        /// does not matter. Furthermore, duplicate keys are not
-        /// allowed.
-        pub issuer_name: Vec<X509NameItem>,
-        pub subject_name: Vec<X509NameItem>,
-        /// The serial of the certificate
-        pub serial: u32,
-        /// The starting day of the certificate's validity. This must
-        /// be a string in the "RFC3339" format. Note that this is required
-        /// as "now" cannot be used to mantain the function pure.
-        pub start_date: String,
-        /// The expiry date of the certificate. This must
-        /// be a string in the "RFC3339" format. Note that this is required
-        /// as "now" cannot be used to mantain the function pure.
-        pub expiry_date: String,
-        /// This controls the parameters related to the
-        /// 'openssl::x509::extension::KeyUsage' extension.
-        /// The value for this field can either be (1) An
-        /// empty vector which will forego this extension
-        /// for the certificate or (2) A single value with
-        /// the parameters for the 'openssl::x509::extension::KeyUsage'
-        /// extension.
-        /// Todo: this should be an optional but it is not yet supported
-        /// by the 'cxx' crate.
-        pub extension_key_usage: Vec<X509KeyUsage>,
-        /// This controls the parameters passed to the
-        /// 'openssl::x509::extension::BasicConstraints' extension.
-        /// The value for this field should either be (1) an empty
-        /// 'Vec' which will forego this extension or (2) a single
-        /// value containing the parameters that will be passed
-        /// to the 'openssl::x509::extension::BasicConstraints'
-        /// extension.
-        /// Todo: replace with an 'Option' once this is supported
-        /// by the 'cxx' crate.
-        pub extension_basic_constraints: Vec<X509BasicConstraints>
+    pub trait IsX509BuildParams {
+        type PrivateKeyIdentity : IsOpensslPrivateKeyIdentity;
+        type NameItem : IsX509NameItem;
+        type KeyUsage : IsX509KeyUsage;
+        type BasicConstraints : IsX509BasicConstraints;
+
+        fn subject_public_key(&self) -> Option<String>;
+        fn signing_private_key_identity(&self) -> Self::PrivateKeyIdentity;
+        fn issuer_name(&self) -> Vec<Self::NameItem>;
+        fn subject_name(&self) -> Vec<Self::NameItem>;
+        fn start_date(&self) -> String;
+        fn expiry_date(&self) -> String;
+        fn extension_key_usage(&self) -> Option<Self::KeyUsage>;
+        fn extension_basic_constraints(&self) -> Option<Self::BasicConstraints>;
+    }
+
+    fn name_from_entries(entries: &Vec<T>) -> Result<X509Name, Error>
+    where T : IsX509NameItem {
+        let mut builder = X509NameBuilder::new()?;
+        for entry in entries.iter() {
+            builder.append_entry_by_text(&entry.entry_name, &entry.entry_value)?;
+        }
+    
+        Ok(builder.build())
+    }
+
+    fn parse_date_rfc3339(date: &str) -> Result<Asn1Time, Error> {
+        let utc = UtcDateTime::parse(date, &Rfc3339)?;
+        Ok(Asn1Time::from_unix(utc.unix_timestamp())?)
+    }
+
+    impl <T: X509KeyUsage> T {
+    
+        pub fn build(&self) -> Result<X509Extension, Error> {
+    
+            let mut builder = KeyUsage::new();
+    
+            if self.critical {
+                builder.critical();
+            }
+    
+            if self.key_cert_sign {
+                builder.key_cert_sign();
+            }
+    
+            if self.crl_sign {
+                builder.crl_sign();
+            }
+    
+            Ok(builder.build()?)
+        }
+    }
+
+    impl ffi::X509BasicConstraints {
+    
+        pub fn build(&self) -> Result<X509Extension, Error> {
+    
+            let mut builder = BasicConstraints::new();
+    
+            if self.critical {
+                builder.critical();
+            }
+    
+            if self.ca {
+                builder.ca();
+            }
+    
+            Ok(builder.build()?)
+        }
+    }
+
+    impl<T : IsX509BuildParams> T {
+    
+        pub fn get_subject_public_key(&self) -> Result<Option<PKey<Public>>, Error> {
+    
+            match self.subject_public_key() {
+                Some(pem) => {
+                    let result = PKey::public_key_from_pem(pem.as_bytes())?;
+                    Ok(Some(result))
+                },
+                None => Ok(None)
+            }
+        }
+    
+        pub fn build_issuer_name(&self) -> Result<X509Name, Error> {
+            name_from_entries(&self.issuer_name())
+        }
+    
+        pub fn build_subject_name(&self) -> Result<X509Name, Error> {
+            name_from_entries(&self.subject_name())
+        }
+    
+        pub fn start_date_as_asn1(&self) -> Result<Asn1Time, Error> {
+            parse_date_rfc3339(&self.start_date())
+        }
+    
+        pub fn expiry_date_as_asn1(&self) -> Result<Asn1Time, Error> {
+            parse_date_3339(&self.expiry_date())
+        }
+    
+        /// Convert the key usage declarations specified in the CXX struct
+        /// into a 'X509Extension' which can be applied when building
+        /// a 'X509' certificate.
+        pub fn build_key_usage_ext(&self) -> Result<Option<X509Extension>, Error> {
+            self.extension_key_usage()
+                .map(|e| e.build())
+                .transpose()
+        }
+    
+        /// Convert the basic constraints that have been declared in the
+        /// CXX call into a 'X509Extension', which can be applied when building
+        /// a 'X509' certificate.
+        pub fn build_basic_constraints_ext(&self) -> Result<Option<X509Extension>, Error> {
+            self.extension_basic_constraints()
+                .map(|e| e.build())
+                .transpose()
+        }
     }
 }
 
@@ -221,145 +275,17 @@ pub mod x509 {
     }
 }
 
-impl IsCryptoStoreKey for ffi::OpensslPrivateKeyIdentity {
-    type Value = pkey::Key;
-
-    fn to_store_key_raw(&self, salt: &[u8]) -> Vec<u8> {
-        let mut hasher = sha::Sha256::new();
-        hasher.update(salt);
-        hasher.update(self.key_type.as_bytes());
-        hasher.update(self.key_id.as_bytes());
-        Vec::from(hasher.finish())
-    }
-
-    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
-        let result = value.pkey.private_key_to_pem_pkcs8()?;
-        Ok(result)
-    }
-
-    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
-        let result = pkey::Key::from_openssl_pkey(
-            PKey::private_key_from_pem(&bytes[..])?
-        );
-        Ok(result)
-    }
-}
-
-impl ffi::X509KeyUsage {
-
-    pub fn build(&self) -> Result<X509Extension, Error> {
-
-        let mut builder = KeyUsage::new();
-
-        if self.critical {
-            builder.critical();
-        }
-
-        if self.key_cert_sign {
-            builder.key_cert_sign();
-        }
-
-        if self.crl_sign {
-            builder.crl_sign();
-        }
-
-        Ok(builder.build()?)
-    }
-}
-
-impl ffi::X509BasicConstraints {
-
-    pub fn build(&self) -> Result<X509Extension, Error> {
-
-        let mut builder = BasicConstraints::new();
-
-        if self.critical {
-            builder.critical();
-        }
-
-        if self.ca {
-            builder.ca();
-        }
-
-        Ok(builder.build()?)
-    }
-}
-
-impl ffi::X509BuildParams {
-
-    fn name_from_entries(entries: &Vec<ffi::X509NameItem>) -> Result<X509Name, Error> {
-
-        let mut builder = X509NameBuilder::new()?;
-        for entry in entries.iter() {
-            builder.append_entry_by_text(&entry.entry_name, &entry.entry_value)?;
-        }
-
-        Ok(builder.build())
-    }
-
-    pub fn get_subject_public_key(&self) -> Result<Option<PKey<Public>>, Error> {
-
-        let key_str = self.subject_public_key.try_option()?;
-
-        match key_str {
-            Some(pem) => {
-                let result = PKey::public_key_from_pem(pem.as_bytes())?;
-                Ok(Some(result))
-            },
-            None => Ok(None)
-        }
-    }
-
-    pub fn build_issuer_name(&self) -> Result<X509Name, Error> {
-        Self::name_from_entries(&self.issuer_name)
-    }
-
-    pub fn build_subject_name(&self) -> Result<X509Name, Error> {
-        Self::name_from_entries(&self.subject_name)
-    }
-
-    fn parse_date(date: &str) -> Result<Asn1Time, Error> {
-        let utc = UtcDateTime::parse(date, &Rfc3339)?;
-        Ok(Asn1Time::from_unix(utc.unix_timestamp())?)
-    }
-
-    pub fn start_date_as_asn1(&self) -> Result<Asn1Time, Error> {
-        Self::parse_date(&self.start_date)
-    }
-
-    pub fn expiry_date_as_asn1(&self) -> Result<Asn1Time, Error> {
-        Self::parse_date(&self.expiry_date)
-    }
-
-    /// Convert the key usage declarations specified in the CXX struct
-    /// into a 'X509Extension' which can be applied when building
-    /// a 'X509' certificate.
-    pub fn build_key_usage_ext(&self) -> Result<Option<X509Extension>, Error> {
-        self.extension_key_usage.try_option()?
-            .map(|e| e.build())
-            .transpose()
-    }
-
-    /// Convert the basic constraints that have been declared in the
-    /// CXX call into a 'X509Extension', which can be applied when building
-    /// a 'X509' certificate.
-    pub fn build_basic_constraints_ext(&self) -> Result<Option<X509Extension>, Error> {
-        self.extension_basic_constraints.try_option()?
-            .map(|e| e.build())
-            .transpose()
-    }
-}
-
 impl CryptoNix {
 
     /// Get the Openssl private key which corresponds to the
     /// given 'OpensslPrivateKeyIdentity'. If there is no key
     /// associated with that identity, a fresh key will be
     /// generated and saved to the store.
-    pub fn openssl_private_key(
+    pub fn openssl_private_key<T>(
         &self,
-        key_identity: &ffi::OpensslPrivateKeyIdentity
-    ) -> Result<pkey::Key, Error> {
+        key_identity: &T
+    ) Result<T as ffi::IsCryptoStoreKey>::Value, Error> 
+    where T : ffi::IsCryptoStoreKey -> {
 
 
         let key_type = pkey::Type::try_from(&key_identity.key_type)?;
@@ -376,10 +302,11 @@ impl CryptoNix {
     /// Construct an X509 certificate. This function accepts a 'X50BuildParams'
     /// which describe how the certificate is to be built in the context of
     /// nix-crypto.
-    pub fn openssl_x509_certificate(
+    pub fn openssl_x509_certificate<T>(
         &self,
-        params: &ffi::X509BuildParams
-    ) -> Result<x509::X509Certificate, Error> {
+        params: &T
+    ) -> Result<x509::X509Certificate, Error>
+    where T : IsX509BuildParams {
 
         let signing_key = self.openssl_private_key(&params.signing_private_key_identity)?;
 

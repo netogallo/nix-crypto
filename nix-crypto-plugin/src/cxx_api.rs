@@ -30,6 +30,30 @@ pub type OpensslPrivateKey = crate::openssl::pkey::Key;
 
 pub type OpensslX509Certificate = crate::openssl::x509::X509Certificate;
 
+impl IsCryptoStoreKey for ffi::OpensslPrivateKeyIdentity {
+    type Value = pkey::Key;
+
+    fn to_store_key_raw(&self, salt: &[u8]) -> Vec<u8> {
+        let mut hasher = sha::Sha256::new();
+        hasher.update(salt);
+        hasher.update(self.key_type.as_bytes());
+        hasher.update(self.key_id.as_bytes());
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
+        let result = value.pkey.private_key_to_pem_pkcs8()?;
+        Ok(result)
+    }
+
+    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
+        let result = pkey::Key::from_openssl_pkey(
+            PKey::private_key_from_pem(&bytes[..])?
+        );
+        Ok(result)
+    }
+}
+
 impl CryptoNix {
 
     pub fn cxx_openssl_private_key(self: &CryptoNix, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<OpensslPrivateKey>, Error> {
