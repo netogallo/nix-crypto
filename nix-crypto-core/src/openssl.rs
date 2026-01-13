@@ -1,24 +1,27 @@
-use openssl::asn1::{Asn1Time};
 use openssl::bn::{BigNum};
 use openssl::hash::{MessageDigest};
-use openssl::pkey::{Public, Private, PKey};
-use openssl::sha;
-use openssl::x509::{X509, X509Extension, X509Name, X509NameBuilder
-    , X509Builder};
-use openssl::x509::extension::{AuthorityKeyIdentifier, KeyUsage, BasicConstraints
-    , SubjectKeyIdentifier};
-
-use time::{UtcDateTime};
-use time::format_description::well_known::{Rfc3339};
+use openssl::pkey::{PKey, Public};
+use openssl::x509::{X509Builder};
+use openssl::x509::extension::{AuthorityKeyIdentifier, SubjectKeyIdentifier};
 
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
-use crate::cxx_support::{CxxTryOption};
 use crate::store::{IsCryptoStoreKey};
 
 pub mod ffi {
 
-    pub trait IsOpensslPrivateKeyIdentity {
+    use openssl::asn1::{Asn1Time};
+    use openssl::pkey::*;
+    use openssl::x509::*;
+    use openssl::x509::extension::*;
+    use time::{UtcDateTime};
+    use time::format_description::well_known::{Rfc3339};
+
+    // Modules from this crate
+    use crate::error::*;
+    use crate::store::{IsCryptoStoreKey};
+
+    pub trait IsOpensslPrivateKeyIdentity : IsCryptoStoreKey<Value = crate::openssl::pkey::Key> {
         fn key_type(&self) -> String;
         fn key_id(&self) -> String;
     }
@@ -49,17 +52,20 @@ pub mod ffi {
         fn signing_private_key_identity(&self) -> Self::PrivateKeyIdentity;
         fn issuer_name(&self) -> Vec<Self::NameItem>;
         fn subject_name(&self) -> Vec<Self::NameItem>;
+        fn serial(&self) -> u32;
         fn start_date(&self) -> String;
         fn expiry_date(&self) -> String;
         fn extension_key_usage(&self) -> Option<Self::KeyUsage>;
         fn extension_basic_constraints(&self) -> Option<Self::BasicConstraints>;
     }
 
-    fn name_from_entries(entries: &Vec<T>) -> Result<X509Name, Error>
-    where T : IsX509NameItem {
+    fn name_from_entries<T : IsX509NameItem>(entries: &Vec<T>) -> Result<X509Name, Error> {
         let mut builder = X509NameBuilder::new()?;
         for entry in entries.iter() {
-            builder.append_entry_by_text(&entry.entry_name, &entry.entry_value)?;
+            builder.append_entry_by_text(
+                entry.entry_name().as_str(),
+                entry.entry_value().as_str()
+            )?;
         }
     
         Ok(builder.build())
@@ -70,101 +76,94 @@ pub mod ffi {
         Ok(Asn1Time::from_unix(utc.unix_timestamp())?)
     }
 
-    impl <T: X509KeyUsage> T {
     
-        pub fn build(&self) -> Result<X509Extension, Error> {
+    pub fn as_key_usage_extension<T: IsX509KeyUsage>(key_usage: &T) -> Result<X509Extension, Error> {
     
-            let mut builder = KeyUsage::new();
+        let mut builder = KeyUsage::new();
     
-            if self.critical {
-                builder.critical();
-            }
-    
-            if self.key_cert_sign {
-                builder.key_cert_sign();
-            }
-    
-            if self.crl_sign {
-                builder.crl_sign();
-            }
-    
-            Ok(builder.build()?)
+        if key_usage.critical() {
+            builder.critical();
         }
+    
+        if key_usage.key_cert_sign() {
+            builder.key_cert_sign();
+        }
+    
+        if key_usage.crl_sign() {
+            builder.crl_sign();
+        }
+    
+        Ok(builder.build()?)
+    }
+    
+    pub fn as_basic_constraints_extension<T: IsX509BasicConstraints>(basic_constraints: &T) -> Result<X509Extension, Error> {
+    
+        let mut builder = BasicConstraints::new();
+    
+        if basic_constraints.critical() {
+            builder.critical();
+        }
+    
+        if basic_constraints.ca() {
+            builder.ca();
+        }
+    
+        Ok(builder.build()?)
     }
 
-    impl ffi::X509BasicConstraints {
     
-        pub fn build(&self) -> Result<X509Extension, Error> {
+    pub fn get_subject_public_key<T: IsX509BuildParams>(params: &T) -> Result<Option<PKey<Public>>, Error> {
     
-            let mut builder = BasicConstraints::new();
-    
-            if self.critical {
-                builder.critical();
-            }
-    
-            if self.ca {
-                builder.ca();
-            }
-    
-            Ok(builder.build()?)
+        match params.subject_public_key() {
+            Some(pem) => {
+                let result = PKey::public_key_from_pem(pem.as_bytes())?;
+                Ok(Some(result))
+            },
+            None => Ok(None)
         }
     }
-
-    impl<T : IsX509BuildParams> T {
     
-        pub fn get_subject_public_key(&self) -> Result<Option<PKey<Public>>, Error> {
+    pub fn build_issuer_name<T: IsX509BuildParams>(params: &T) -> Result<X509Name, Error> {
+        name_from_entries(&params.issuer_name())
+    }
     
-            match self.subject_public_key() {
-                Some(pem) => {
-                    let result = PKey::public_key_from_pem(pem.as_bytes())?;
-                    Ok(Some(result))
-                },
-                None => Ok(None)
-            }
-        }
+    pub fn build_subject_name<T: IsX509BuildParams>(params: &T) -> Result<X509Name, Error> {
+        name_from_entries(&params.subject_name())
+    }
     
-        pub fn build_issuer_name(&self) -> Result<X509Name, Error> {
-            name_from_entries(&self.issuer_name())
-        }
+    pub fn start_date_as_asn1<T: IsX509BuildParams>(params: &T) -> Result<Asn1Time, Error> {
+        parse_date_rfc3339(&params.start_date())
+    }
     
-        pub fn build_subject_name(&self) -> Result<X509Name, Error> {
-            name_from_entries(&self.subject_name())
-        }
+    pub fn expiry_date_as_asn1<T: IsX509BuildParams>(params: &T) -> Result<Asn1Time, Error> {
+        parse_date_rfc3339(&params.expiry_date())
+    }
     
-        pub fn start_date_as_asn1(&self) -> Result<Asn1Time, Error> {
-            parse_date_rfc3339(&self.start_date())
-        }
+    /// Convert the key usage declarations specified in the CXX struct
+    /// into a 'X509Extension' which can be applied when building
+    /// a 'X509' certificate.
+    pub fn build_key_usage_ext<T: IsX509BuildParams>(params: &T) -> Result<Option<X509Extension>, Error> {
+        params.extension_key_usage()
+            .map(|e : T::KeyUsage| as_key_usage_extension(&e))
+            .transpose()
+    }
     
-        pub fn expiry_date_as_asn1(&self) -> Result<Asn1Time, Error> {
-            parse_date_3339(&self.expiry_date())
-        }
-    
-        /// Convert the key usage declarations specified in the CXX struct
-        /// into a 'X509Extension' which can be applied when building
-        /// a 'X509' certificate.
-        pub fn build_key_usage_ext(&self) -> Result<Option<X509Extension>, Error> {
-            self.extension_key_usage()
-                .map(|e| e.build())
-                .transpose()
-        }
-    
-        /// Convert the basic constraints that have been declared in the
-        /// CXX call into a 'X509Extension', which can be applied when building
-        /// a 'X509' certificate.
-        pub fn build_basic_constraints_ext(&self) -> Result<Option<X509Extension>, Error> {
-            self.extension_basic_constraints()
-                .map(|e| e.build())
-                .transpose()
-        }
+    /// Convert the basic constraints that have been declared in the
+    /// CXX call into a 'X509Extension', which can be applied when building
+    /// a 'X509' certificate.
+    pub fn build_basic_constraints_ext<T: IsX509BuildParams>(params: &T) -> Result<Option<X509Extension>, Error> {
+        params.extension_basic_constraints()
+            .map(|e : T::BasicConstraints| as_basic_constraints_extension(&e))
+            .transpose()
     }
 }
 
 pub mod pkey {
-    use openssl::pkey::{PKey, PKeyRef, Public, Private};
+    use openssl::pkey::{PKey, Public, Private};
     use openssl::rsa;
 
+    // Imports from this crate
     use crate::error::{Error};
-    use crate::store::{IsCryptoStoreKey};
 
     #[repr(u8)]
     pub enum Type {
@@ -281,14 +280,13 @@ impl CryptoNix {
     /// given 'OpensslPrivateKeyIdentity'. If there is no key
     /// associated with that identity, a fresh key will be
     /// generated and saved to the store.
-    pub fn openssl_private_key<T>(
+    pub fn openssl_private_key<T : ffi::IsOpensslPrivateKeyIdentity>(
         &self,
         key_identity: &T
-    ) Result<T as ffi::IsCryptoStoreKey>::Value, Error> 
-    where T : ffi::IsCryptoStoreKey -> {
+    ) -> Result<T::Value, Error> {
 
 
-        let key_type = pkey::Type::try_from(&key_identity.key_type)?;
+        let key_type = pkey::Type::try_from(&key_identity.key_type())?;
         match self.get(key_identity)? {
             Some(key) => Ok(key),
             None => {
@@ -302,15 +300,14 @@ impl CryptoNix {
     /// Construct an X509 certificate. This function accepts a 'X50BuildParams'
     /// which describe how the certificate is to be built in the context of
     /// nix-crypto.
-    pub fn openssl_x509_certificate<T>(
+    pub fn openssl_x509_certificate<T : ffi::IsX509BuildParams>(
         &self,
         params: &T
-    ) -> Result<x509::X509Certificate, Error>
-    where T : IsX509BuildParams {
+    ) -> Result<x509::X509Certificate, Error> {
 
-        let signing_key = self.openssl_private_key(&params.signing_private_key_identity)?;
+        let signing_key = self.openssl_private_key(&params.signing_private_key_identity())?;
 
-        let subject_key: PKey<Public> = match params.get_subject_public_key()? {
+        let subject_key: PKey<Public> = match ffi::get_subject_public_key(params)? {
 
             // Subject has been explicitly provided
             Some(sub) => sub,
@@ -320,26 +317,26 @@ impl CryptoNix {
         };
 
         let mut builder = X509Builder::new()?;
-        let issuer_name = params.build_issuer_name()?;
-        let subject_name = params.build_subject_name()?;
+        let issuer_name = ffi::build_issuer_name(params)?;
+        let subject_name = ffi::build_subject_name(params)?;
 
         builder.set_pubkey(&subject_key)?;
         builder.set_issuer_name(&issuer_name)?;
         builder.set_subject_name(&subject_name)?;
 
-        let serial = BigNum::from_u32(params.serial)?.to_asn1_integer()?;
+        let serial = BigNum::from_u32(params.serial())?.to_asn1_integer()?;
         builder.set_serial_number(&serial)?;
 
-        let start_date = params.start_date_as_asn1()?;
-        let expiry_date = params.expiry_date_as_asn1()?;
+        let start_date = ffi::start_date_as_asn1(params)?;
+        let expiry_date = ffi::expiry_date_as_asn1(params)?;
         builder.set_not_before(&start_date)?;
         builder.set_not_after(&expiry_date)?;
 
-        params.build_key_usage_ext()?
+        ffi::build_key_usage_ext(params)?
             .map(|e| builder.append_extension(e))
             .transpose()?;
 
-        params.build_basic_constraints_ext()?
+        ffi::build_basic_constraints_ext(params)?
             .map(|e| builder.append_extension(e))
             .transpose()?;
 
