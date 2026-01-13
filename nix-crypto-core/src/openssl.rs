@@ -2,6 +2,7 @@ use openssl::asn1::{Asn1Time};
 use openssl::bn::{BigNum};
 use openssl::hash::{MessageDigest};
 use openssl::pkey::{Public, Private, PKey};
+use openssl::sha;
 use openssl::x509::{X509, X509Extension, X509Name, X509NameBuilder
     , X509Builder};
 use openssl::x509::extension::{AuthorityKeyIdentifier, KeyUsage, BasicConstraints
@@ -12,16 +13,102 @@ use time::format_description::well_known::{Rfc3339};
 
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
-use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams, X509NameItem, X509KeyUsage, X509BasicConstraints};
 use crate::cxx_support::{CxxTryOption};
 use crate::store::{IsCryptoStoreKey};
+
+#[cxx::bridge]
+pub mod ffi {
+
+    /// This struct defines a key identity for openssl. An identity
+    /// is simply an object that is able to reference a particular key.
+    /// In order to avoid exposing private keys in nix code (so they cannot
+    /// land in the store), nix code will provide an identity (rather than
+    /// the private key) to indicate what key is to be used to sign/encrypt
+    /// values.
+    pub struct OpensslPrivateKeyIdentity {
+        pub key_type: String,
+        pub key_id : String
+    }
+
+    pub struct X509NameItem {
+        pub entry_name: String,
+        pub entry_value: String
+    }
+
+    pub struct X509KeyUsage {
+        pub critical: bool,
+        pub key_cert_sign: bool,
+        pub crl_sign: bool
+    }
+
+    pub struct X509BasicConstraints {
+        pub critical: bool,
+        pub ca: bool
+    }
+
+    /// This struct identifies a X509Certificate. Note that
+    /// each parameter has additional constraints. The expectation
+    /// is that the same set of parameters will result in the same
+    /// certificate accross multiple invocations.
+    pub struct X509BuildParams {
+        /// The public key asociated to the private key of
+        /// the certificate's subject. The value should be one
+        /// of the following:
+        /// * A Vec containing a *single* element which must be
+        ///   the key as a PEM encoded String
+        /// * An *empty* Vec. In this case, the certificate will
+        ///   be a "self-signed" certificate, meaning the public
+        ///   key associated to the signing key will be the
+        ///   certificate's subject's private key.
+        ///
+        /// Todo: Ideally, this should be an 'Option<String>' but
+        /// it seems that is not supported by the CXX crate.
+        pub subject_public_key: Vec<String>,
+        /// The private key that will be used to sign the certificate.
+        pub signing_private_key_identity: OpensslPrivateKeyIdentity,
+        /// The name components of the certificate. Note that for
+        /// identity purposes, the order in which they are defined
+        /// does not matter. Furthermore, duplicate keys are not
+        /// allowed.
+        pub issuer_name: Vec<X509NameItem>,
+        pub subject_name: Vec<X509NameItem>,
+        /// The serial of the certificate
+        pub serial: u32,
+        /// The starting day of the certificate's validity. This must
+        /// be a string in the "RFC3339" format. Note that this is required
+        /// as "now" cannot be used to mantain the function pure.
+        pub start_date: String,
+        /// The expiry date of the certificate. This must
+        /// be a string in the "RFC3339" format. Note that this is required
+        /// as "now" cannot be used to mantain the function pure.
+        pub expiry_date: String,
+        /// This controls the parameters related to the
+        /// 'openssl::x509::extension::KeyUsage' extension.
+        /// The value for this field can either be (1) An
+        /// empty vector which will forego this extension
+        /// for the certificate or (2) A single value with
+        /// the parameters for the 'openssl::x509::extension::KeyUsage'
+        /// extension.
+        /// Todo: this should be an optional but it is not yet supported
+        /// by the 'cxx' crate.
+        pub extension_key_usage: Vec<X509KeyUsage>,
+        /// This controls the parameters passed to the
+        /// 'openssl::x509::extension::BasicConstraints' extension.
+        /// The value for this field should either be (1) an empty
+        /// 'Vec' which will forego this extension or (2) a single
+        /// value containing the parameters that will be passed
+        /// to the 'openssl::x509::extension::BasicConstraints'
+        /// extension.
+        /// Todo: replace with an 'Option' once this is supported
+        /// by the 'cxx' crate.
+        pub extension_basic_constraints: Vec<X509BasicConstraints>
+    }
+}
 
 pub mod pkey {
     use openssl::pkey::{PKey, PKeyRef, Public, Private};
     use openssl::rsa;
-    use openssl::sha;
 
-    use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity};
     use crate::error::{Error};
     use crate::store::{IsCryptoStoreKey};
 
@@ -106,30 +193,6 @@ pub mod pkey {
             Ok(result)
         }
     }
-
-    impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
-        type Value = Key;
-    
-        fn to_store_key_raw(&self, salt: &[u8]) -> Vec<u8> {
-            let mut hasher = sha::Sha256::new();
-            hasher.update(salt);
-            hasher.update(self.key_type.as_bytes());
-            hasher.update(self.key_id.as_bytes());
-            Vec::from(hasher.finish())
-        }
-    
-        fn to_store_value_raw(value: &Key) -> Result<Vec<u8>, Error> {
-            let result = value.pkey.private_key_to_pem_pkcs8()?;
-            Ok(result)
-        }
-    
-        fn from_store_value_raw(bytes: &Vec<u8>) -> Result<Key, Error> {
-            let result = Key::from_openssl_pkey(
-                PKey::private_key_from_pem(&bytes[..])?
-            );
-            Ok(result)
-        }
-    }
 }
 
 pub mod x509 {
@@ -158,7 +221,31 @@ pub mod x509 {
     }
 }
 
-impl X509KeyUsage {
+impl IsCryptoStoreKey for ffi::OpensslPrivateKeyIdentity {
+    type Value = pkey::Key;
+
+    fn to_store_key_raw(&self, salt: &[u8]) -> Vec<u8> {
+        let mut hasher = sha::Sha256::new();
+        hasher.update(salt);
+        hasher.update(self.key_type.as_bytes());
+        hasher.update(self.key_id.as_bytes());
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
+        let result = value.pkey.private_key_to_pem_pkcs8()?;
+        Ok(result)
+    }
+
+    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
+        let result = pkey::Key::from_openssl_pkey(
+            PKey::private_key_from_pem(&bytes[..])?
+        );
+        Ok(result)
+    }
+}
+
+impl ffi::X509KeyUsage {
 
     pub fn build(&self) -> Result<X509Extension, Error> {
 
@@ -180,7 +267,7 @@ impl X509KeyUsage {
     }
 }
 
-impl X509BasicConstraints {
+impl ffi::X509BasicConstraints {
 
     pub fn build(&self) -> Result<X509Extension, Error> {
 
@@ -198,9 +285,9 @@ impl X509BasicConstraints {
     }
 }
 
-impl X509BuildParams {
+impl ffi::X509BuildParams {
 
-    fn name_from_entries(entries: &Vec<X509NameItem>) -> Result<X509Name, Error> {
+    fn name_from_entries(entries: &Vec<ffi::X509NameItem>) -> Result<X509Name, Error> {
 
         let mut builder = X509NameBuilder::new()?;
         for entry in entries.iter() {
@@ -271,7 +358,7 @@ impl CryptoNix {
     /// generated and saved to the store.
     pub fn openssl_private_key(
         &self,
-        key_identity: &OpensslPrivateKeyIdentity
+        key_identity: &ffi::OpensslPrivateKeyIdentity
     ) -> Result<pkey::Key, Error> {
 
 
@@ -286,9 +373,12 @@ impl CryptoNix {
         }
     }
 
+    /// Construct an X509 certificate. This function accepts a 'X50BuildParams'
+    /// which describe how the certificate is to be built in the context of
+    /// nix-crypto.
     pub fn openssl_x509_certificate(
         &self,
-        params: &X509BuildParams
+        params: &ffi::X509BuildParams
     ) -> Result<x509::X509Certificate, Error> {
 
         let signing_key = self.openssl_private_key(&params.signing_private_key_identity)?;

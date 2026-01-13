@@ -806,10 +806,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
-name = "nix-crypto-core"
+name = "nix_crypto_core"
 version = "0.1.0"
 dependencies = [
  "age",
+ "cxx",
  "openssl",
  "regex",
  "sled",
@@ -817,14 +818,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "nix-crypto-plugin"
+name = "nix_crypto_plugin"
 version = "0.1.0"
 dependencies = [
  "ctor",
  "cxx",
  "cxx-build",
  "libc",
- "nix-crypto-core",
+ "nix_crypto_core",
  "pkg-config",
 ]
 
