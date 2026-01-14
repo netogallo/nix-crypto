@@ -8,7 +8,7 @@ use cxx::{CxxString, UniquePtr};
 
 use nix_crypto_core::error::{Error};
 use nix_crypto_core::foundations::{CryptoNix};
-pub use nix_crypto_core::openssl::ffi;
+use nix_crypto_core::openssl::ffi::*;
 
 use crate::cxx_api::*;
 
@@ -118,7 +118,7 @@ pub mod ffi {
     }
 
     unsafe extern "C++" {
-        include!("nix-crypto/include/nix_crypto.hh");
+        include!("nix_crypto_plugin/include/nix_crypto.hh");
 
         fn init_primops();
 

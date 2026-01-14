@@ -810,7 +810,6 @@ name = "nix_crypto_core"
 version = "0.1.0"
 dependencies = [
  "age",
- "cxx",
  "openssl",
  "regex",
  "sled",

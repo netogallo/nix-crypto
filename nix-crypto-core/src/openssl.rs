@@ -8,6 +8,14 @@ use crate::error::{Error};
 use crate::foundations::{CryptoNix};
 use crate::store::{IsCryptoStoreKey};
 
+/// This module defines traits which describe the fields expected from
+/// CXX types. The reason why this is needed is because the "cxx" crate
+/// needs types to be defined in the same module in order for the fields
+/// of the type to be visible in C++. Since theese types are built with
+/// C++ code and then passed to rust code they cannot be opaque and cannot
+/// be defined in this crate as this crate is meant to contain all the core
+/// logic of nix-crypto as a rust library which should not have any dependencies
+/// on the nix libraries.
 pub mod ffi {
 
     use openssl::asn1::{Asn1Time};

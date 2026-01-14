@@ -1,7 +1,7 @@
 #include <format>
 
-#include "nix-crypto/include/nix_crypto.hh"
-#include "nix-crypto/src/cxx_bridge.rs.h"
+#include "nix_crypto_plugin/include/nix_crypto.hh"
+#include "nix_crypto_plugin/src/cxx_bridge.rs.h"
 
 using namespace nix;
 

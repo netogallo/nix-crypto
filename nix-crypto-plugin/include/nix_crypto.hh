@@ -9,7 +9,7 @@
 #include <nix/util/config-global.hh>
 #include <rust/cxx.h>
 
-#include "nix-crypto/src/cxx_bridge.rs.h"
+#include "nix_crypto_plugin/src/cxx_bridge.rs.h"
 
 struct CryptoNix;
 
