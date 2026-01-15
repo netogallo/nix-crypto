@@ -10,6 +10,11 @@ pub struct CryptoNix {
 
 impl CryptoNix {
 
+    fn to_store_key_raw<Key: IsCryptoStoreKey>(&self, key: &Key) -> Vec<u8> {
+        let hasher = StoreHasher::init(&self.salt());
+        key.to_store_key_raw(hasher)
+    }
+
     /// Try getting a value from the 'CryptoStore' which is associated
     /// with the 'key' parameter. If the value does not exist in the
     /// store, 'Nothing' is returned. Otherwise the value gets returned.
@@ -20,7 +25,7 @@ impl CryptoNix {
         key: &K
     ) -> Result<Option<<K as IsCryptoStoreKey>::Value>, Error> {
 
-        match self.store.get_raw(&key.to_store_key_raw(&self.salt()[..])[..])? {
+        match self.store.get_raw(&self.to_store_key_raw(key)[..])? {
             Some(vec) => Ok(Some(<K as IsCryptoStoreKey>::from_store_value_raw(&vec)?)),
             _ => Ok(None)
         }
@@ -34,7 +39,7 @@ impl CryptoNix {
     where {
 
         self.store.put_raw(
-            &key.to_store_key_raw(&self.salt()[..])[..],
+            &self.to_store_key_raw(key)[..],
             <K as IsCryptoStoreKey>::to_store_value_raw(value)?
         )
     }

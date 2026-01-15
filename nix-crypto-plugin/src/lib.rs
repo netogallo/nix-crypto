@@ -1,14 +1,15 @@
 use ctor::{ctor,dtor};
+use cxx_bridge::ffi::{init_primops, destroy_primops};
 
 mod cxx_api;
 mod cxx_bridge;
 
 #[ctor]
 fn init() {
-    ffi::init_primops();
+    init_primops();
 }
 
 #[dtor]
 fn exit() {
-    ffi::destroy_primops();
+    destroy_primops();
 }

@@ -1,4 +1,24 @@
+use openssl::sha::Sha256;
+
 use crate::error::*;
+
+pub struct StoreHasher(Sha256);
+
+impl StoreHasher {
+    pub fn init(salt: &[u8]) -> Self {
+        let mut sha256 = Sha256::new();
+        sha256.update(salt);
+        StoreHasher(sha256)
+    }
+
+    pub fn update(&mut self, buf: &[u8]) {
+        self.0.update(buf);
+    }
+
+    pub fn finish(mut self) -> [u8; 32] {
+        self.0.finish()
+    }
+}
 
 /// This trait servs to tag values that can be used as a key for
 /// the 'CryptoStore'. Must have an asociated value, which  must
@@ -7,7 +27,7 @@ use crate::error::*;
 /// when saved/fetched from the store.
 pub trait IsCryptoStoreKey {
     type Value;
-    fn to_store_key_raw(&self, salt: &[u8]) -> Vec<u8>;
+    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8>;
     fn to_store_value_raw(value: &Self::Value) -> Result<Vec<u8>, Error>;
     fn from_store_value_raw(value: &Vec<u8>) -> Result<Self::Value, Error>;
 }

@@ -11,7 +11,7 @@
 
 #include "nix_crypto_plugin/src/cxx_bridge.rs.h"
 
-struct CryptoNix;
+struct CxxNixCrypto;
 
 struct ExtraBuiltinsSettings : nix::Config {
   nix::Setting<std::string> extraCryptoNixArgs{
@@ -27,7 +27,7 @@ class CryptoNixPrimops {
   CryptoNixPrimops();
   ~CryptoNixPrimops();
 
-  std::string openssl_public_key_pem(OpensslPrivateKeyIdentity&& key_identity);
+  std::string opensslPublicKeyPem(OpensslPrivateKeyIdentity&& key_identity);
   std::string opensslX509Pem(X509BuildParams&& buildParams);
 
   private:
@@ -45,9 +45,9 @@ class CryptoNixPrimops {
   // (yet) expose option types, a c++ smart pointer is used for the sole
   // purpose of delyaing the initialization of this value until
   // the first usage of cryptonix.
-  std::unique_ptr<rust::Box<CryptoNix>> cryptoNixPtr;
+  std::unique_ptr<rust::Box<CxxNixCrypto>> cryptoNixPtr;
 
-  rust::Box<CryptoNix>& cryptoNix() noexcept;
+  rust::Box<CxxNixCrypto>& cryptoNix() noexcept;
 };
 
 void init_primops();

@@ -101,20 +101,20 @@ pub mod ffi {
 
     extern "Rust" {
 
-        type CryptoNix;
-        type OpensslPrivateKey;
-        type OpensslX509Certificate;
+        type CxxNixCrypto;
+        type CxxOpensslPrivateKey;
+        type CxxOpensslX509Certificate;
 
-        fn cryptonix_with_settings(settings: &CxxString) -> Box<CryptoNix>;
+        fn nix_crypto_with_settings(settings: &CxxString) -> Box<CxxNixCrypto>;
         fn rust_add(left: u64, right: u64) -> u64;
 
-        fn cxx_openssl_private_key(self: &CryptoNix, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<OpensslPrivateKey>>;
+        fn cxx_openssl_private_key(self: &CxxNixCrypto, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<CxxOpensslPrivateKey>>;
 
-        fn cxx_openssl_x509_certificate(self: &CryptoNix, args: X509BuildParams) -> Result<Box<OpensslX509Certificate>>;
+        fn cxx_openssl_x509_certificate(self: &CxxNixCrypto, args: X509BuildParams) -> Result<Box<CxxOpensslX509Certificate>>;
 
-        fn public_pem(self: &OpensslPrivateKey) -> Result<String>;
+        fn public_pem(self: &CxxOpensslPrivateKey) -> Result<String>;
 
-        fn public_pem(self: &OpensslX509Certificate) -> Result<String>;
+        fn public_pem(self: &CxxOpensslX509Certificate) -> Result<String>;
     }
 
     unsafe extern "C++" {

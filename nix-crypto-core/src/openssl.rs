@@ -228,6 +228,16 @@ pub mod pkey {
 
     impl Key {
 
+        pub fn key_to_pem(&self) -> Result<Vec<u8>, Error> {
+            let result = self.pkey.private_key_to_pem_pkcs8()?;
+            Ok(result)
+        }
+
+        pub fn key_from_pem(pem_bytes: &[u8]) -> Result<Self, Error> {
+            let pkey = PKey::private_key_from_pem(pem_bytes)?;
+            Ok(Self::from_openssl_pkey(pkey))
+        }
+
         pub fn from_openssl_pkey(pkey: PKey<Private>) -> Self {
             Key { pkey: pkey }
         }

@@ -63,7 +63,7 @@ static OpensslPrivateKeyIdentity openssl_get_private_key_identity(
 static void primop_openssl_public_key_pem(EvalState& state, const PosIdx pos, Value** args, Value& result) {
 
     try {
-        auto pem = primops->openssl_public_key_pem(
+        auto pem = primops->opensslPublicKeyPem(
             std::move(openssl_get_private_key_identity(state, pos, *args[0]))
         );
         result.mkString(pem);
@@ -391,18 +391,18 @@ CryptoNixPrimops::CryptoNixPrimops()
     , cryptoNixSettings()
     , registerCryptoNixSettings(&cryptoNixSettings) {}
 
-rust::Box<CryptoNix>& CryptoNixPrimops::cryptoNix() noexcept {
+rust::Box<CxxNixCrypto>& CryptoNixPrimops::cryptoNix() noexcept {
 
     if(!cryptoNixPtr) {
-        cryptoNixPtr = std::make_unique<rust::Box<CryptoNix>>(
-            cryptonix_with_settings(cryptoNixSettings.extraCryptoNixArgs)
+        cryptoNixPtr = std::make_unique<rust::Box<CxxNixCrypto>>(
+            nix_crypto_with_settings(cryptoNixSettings.extraCryptoNixArgs)
         );
     }
 
     return *cryptoNixPtr;
 }
 
-std::string CryptoNixPrimops::openssl_public_key_pem(OpensslPrivateKeyIdentity&& key_identity) {
+std::string CryptoNixPrimops::opensslPublicKeyPem(OpensslPrivateKeyIdentity&& key_identity) {
 
     return std::string(
         cryptoNix()->cxx_openssl_private_key(key_identity)->public_pem().c_str()
