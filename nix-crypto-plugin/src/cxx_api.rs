@@ -5,10 +5,12 @@ use std::boxed::{Box};
 use nix_crypto_core::error::{Error};
 use nix_crypto_core::foundations::{CryptoNix};
 use nix_crypto_core::store::{IsCryptoStoreKey, StoreHasher};
+use nix_crypto_core::openssl::ffi;
 use nix_crypto_core::openssl::pkey;
 
 // Imports from this crate
-use crate::cxx_bridge::ffi::{OpensslPrivateKeyIdentity, X509BuildParams};
+use crate::cxx_bridge::ffi::*;
+use crate::cxx_support::*;
 
 pub fn rust_add(left: u64, right: u64) -> u64 {
     left + right
@@ -38,11 +40,101 @@ pub fn nix_crypto_with_settings(params: &CxxString) -> Box<CxxNixCrypto> {
 
 pub struct CxxOpensslPrivateKey(nix_crypto_core::openssl::pkey::Key);
 
+impl ffi::IsOpensslPrivateKeyIdentity for OpensslPrivateKeyIdentity {
+
+    fn key_type(&self) -> &String {
+        &self.key_type
+    }
+
+    fn key_id(&self) -> &String {
+        &self.key_id
+    }
+}
+
 impl CxxOpensslPrivateKey {
     pub fn public_pem(&self) -> Result<String, Error> {
         self.0.public_pem()
     }
 }
+
+impl ffi::IsX509NameItem for X509NameItem {
+    fn entry_name(&self) -> &String {
+        &self.entry_name
+    }
+
+    fn entry_value(&self) -> &String {
+        &self.entry_value
+    }
+}
+
+impl ffi::IsX509KeyUsage for X509KeyUsage {
+
+    fn critical(&self) -> bool {
+        self.critical
+    }
+
+    fn key_cert_sign(&self) -> bool {
+        self.key_cert_sign
+    }
+
+    fn crl_sign(&self) -> bool {
+        self.crl_sign
+    }
+}
+
+impl ffi::IsX509BasicConstraints for X509BasicConstraints {
+    fn critical(&self) -> bool {
+        self.critical
+    }
+
+    fn ca(&self) -> bool {
+        self.ca
+    }
+}
+
+impl ffi::IsX509BuildParams for X509BuildParams {
+    type PrivateKeyIdentity = OpensslPrivateKeyIdentity;
+    type NameItem = X509NameItem;
+    type KeyUsage = X509KeyUsage;
+    type BasicConstraints = X509BasicConstraints;
+
+    fn subject_public_key(&self) -> Option<&String> {
+        self.subject_public_key.try_option().unwrap()
+    }
+
+    fn signing_private_key_identity(&self) -> &OpensslPrivateKeyIdentity {
+        &self.signing_private_key_identity
+    }
+
+    fn issuer_name(&self) -> &Vec<X509NameItem> {
+        &self.issuer_name
+    }
+
+    fn subject_name(&self) -> &Vec<X509NameItem> {
+        &self.subject_name
+    }
+
+    fn serial(&self) -> u32 {
+        self.serial
+    }
+
+    fn start_date(&self) -> &String {
+        &self.start_date
+    }
+
+    fn expiry_date(&self) -> &String {
+        &self.expiry_date
+    }
+
+    fn extension_key_usage(&self) -> Option<&X509KeyUsage> {
+        self.extension_key_usage.try_option().unwrap()
+    }
+
+    fn extension_basic_constraints(&self) -> Option<&X509BasicConstraints> {
+        self.extension_basic_constraints.try_option().unwrap()
+    }
+}
+
 
 pub struct CxxOpensslX509Certificate(nix_crypto_core::openssl::x509::X509Certificate);
 

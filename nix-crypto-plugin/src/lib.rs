@@ -3,6 +3,7 @@ use cxx_bridge::ffi::{init_primops, destroy_primops};
 
 mod cxx_api;
 mod cxx_bridge;
+mod cxx_support;
 
 #[ctor]
 fn init() {

@@ -1,6 +1,6 @@
 use core::option::{Option};
 
-use crate::error::*;
+use nix_crypto_core::error::*;
 
 /// This trait is meant to tag values that might be used as an
 /// option in C++. This is here because the 'cxx' crate does

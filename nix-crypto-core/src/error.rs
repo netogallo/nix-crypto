@@ -7,6 +7,7 @@ use std::string;
 /// within the 'CryptoNix' crate. All functions
 /// that can fail will fail with this error type.
 #[derive(Clone)]
+#[derive(Debug)]
 pub enum Error {
     OpensslError(ErrorStack),
     CxxError(String),

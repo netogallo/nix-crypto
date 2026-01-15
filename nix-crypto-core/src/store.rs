@@ -15,7 +15,7 @@ impl StoreHasher {
         self.0.update(buf);
     }
 
-    pub fn finish(mut self) -> [u8; 32] {
+    pub fn finish(self) -> [u8; 32] {
         self.0.finish()
     }
 }

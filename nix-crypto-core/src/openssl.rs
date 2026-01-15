@@ -30,13 +30,13 @@ pub mod ffi {
     use crate::store::{IsCryptoStoreKey};
 
     pub trait IsOpensslPrivateKeyIdentity : IsCryptoStoreKey<Value = crate::openssl::pkey::Key> {
-        fn key_type(&self) -> String;
-        fn key_id(&self) -> String;
+        fn key_type(&self) -> &String;
+        fn key_id(&self) -> &String;
     }
 
     pub trait IsX509NameItem {
-        fn entry_name(&self) -> String;
-        fn entry_value(&self) -> String;
+        fn entry_name(&self) -> &String;
+        fn entry_value(&self) -> &String;
     }
 
     pub trait IsX509KeyUsage {
@@ -56,15 +56,15 @@ pub mod ffi {
         type KeyUsage : IsX509KeyUsage;
         type BasicConstraints : IsX509BasicConstraints;
 
-        fn subject_public_key(&self) -> Option<String>;
-        fn signing_private_key_identity(&self) -> Self::PrivateKeyIdentity;
-        fn issuer_name(&self) -> Vec<Self::NameItem>;
-        fn subject_name(&self) -> Vec<Self::NameItem>;
+        fn subject_public_key(&self) -> Option<&String>;
+        fn signing_private_key_identity(&self) -> &Self::PrivateKeyIdentity;
+        fn issuer_name(&self) -> &Vec<Self::NameItem>;
+        fn subject_name(&self) -> &Vec<Self::NameItem>;
         fn serial(&self) -> u32;
-        fn start_date(&self) -> String;
-        fn expiry_date(&self) -> String;
-        fn extension_key_usage(&self) -> Option<Self::KeyUsage>;
-        fn extension_basic_constraints(&self) -> Option<Self::BasicConstraints>;
+        fn start_date(&self) -> &String;
+        fn expiry_date(&self) -> &String;
+        fn extension_key_usage(&self) -> Option<&Self::KeyUsage>;
+        fn extension_basic_constraints(&self) -> Option<&Self::BasicConstraints>;
     }
 
     fn name_from_entries<T : IsX509NameItem>(entries: &Vec<T>) -> Result<X509Name, Error> {
@@ -152,7 +152,7 @@ pub mod ffi {
     /// a 'X509' certificate.
     pub fn build_key_usage_ext<T: IsX509BuildParams>(params: &T) -> Result<Option<X509Extension>, Error> {
         params.extension_key_usage()
-            .map(|e : T::KeyUsage| as_key_usage_extension(&e))
+            .map(|e : &T::KeyUsage| as_key_usage_extension(e))
             .transpose()
     }
     
@@ -161,7 +161,7 @@ pub mod ffi {
     /// a 'X509' certificate.
     pub fn build_basic_constraints_ext<T: IsX509BuildParams>(params: &T) -> Result<Option<X509Extension>, Error> {
         params.extension_basic_constraints()
-            .map(|e : T::BasicConstraints| as_basic_constraints_extension(&e))
+            .map(|e : &T::BasicConstraints| as_basic_constraints_extension(e))
             .transpose()
     }
 }
@@ -304,7 +304,7 @@ impl CryptoNix {
     ) -> Result<T::Value, Error> {
 
 
-        let key_type = pkey::Type::try_from(&key_identity.key_type())?;
+        let key_type = pkey::Type::try_from(key_identity.key_type())?;
         match self.get(key_identity)? {
             Some(key) => Ok(key),
             None => {
@@ -323,7 +323,7 @@ impl CryptoNix {
         params: &T
     ) -> Result<x509::X509Certificate, Error> {
 
-        let signing_key = self.openssl_private_key(&params.signing_private_key_identity())?;
+        let signing_key = self.openssl_private_key(params.signing_private_key_identity())?;
 
         let subject_key: PKey<Public> = match ffi::get_subject_public_key(params)? {
 
