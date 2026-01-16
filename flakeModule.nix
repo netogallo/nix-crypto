@@ -1,5 +1,6 @@
 { self, lib, flake-parts-lib, ... }:
 let
+  nixpkgs = self.inputs.nixpkgs;
   inherit (flake-parts-lib)
     mkPerSystemOption;
   inherit (lib)
@@ -10,6 +11,8 @@ in
   options.perSystem = mkPerSystemOption ({ pkgs, system, config, ... }:
   let
     nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
+
+    args = ''{ system = \"${system}\"; nixpkgs = \"${nixpkgs}\"; }'';
 
     nix-crypto-dev = pkgs.writeScriptBin "nix-crypto" ''
       STORE=$(mktemp -d)
@@ -28,9 +31,9 @@ in
       STORE=$(mktemp -d)
       nix \
         --extra-experimental-features nix-command \
-        --option plugin-files "$PWD/target/debug/libnix_crypto.so" \
+        --option plugin-files "$PWD/target/debug/libnix_crypto_plugin.so" \
         --option extra-cryptonix-args "mode=filesystem&store-path=$STORE" \
-        eval --show-trace --impure --expr "import \"$PWD/test/main-dev.nix\" { pwd = \"$PWD\"; }"
+        eval --show-trace --impure --expr "import \"$PWD/test/main-dev.nix\" ${args}"
     '';
   in
     {
@@ -64,10 +67,11 @@ in
               runtimeInputs = [ nix-crypto.packages.nix-crypto ];
               text = ''
                 STORE=$(mktemp -d)
+                cd ${./.}
                 nix \
                   --extra-experimental-features nix-command \
                   --option extra-cryptonix-args "mode=filesystem&store-path=$STORE" \
-                  eval --impure --expr 'import "${./test/main.nix}" {}'
+                  eval --impure --expr "import ./test/main-dev.nix ${args}"
               '';
             }
           ;

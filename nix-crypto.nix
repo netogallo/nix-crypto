@@ -35,7 +35,7 @@ let
     		mkdir -p $out/bin
     
     		makeWrapper ${nix-main}/bin/nix $out/bin/nix \
-          --add-flags "--option plugin-files ${nix-crypto-plugin}/lib/libnix_crypto.so"
+          --add-flags "--option plugin-files ${nix-crypto-plugin}/lib/libnix_crypto_plugin.so"
     	'';
     }
   ;
