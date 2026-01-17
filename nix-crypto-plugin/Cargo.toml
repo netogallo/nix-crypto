@@ -1,0 +1,18 @@
+[package]
+name = "nix_crypto_plugin"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"
+cxx = "1.0"
+ctor = "0.2"
+nix_crypto_core = { path = "../nix-crypto-core" }
+
+[build-dependencies]
+cxx-build = "1.0"
+pkg-config = "0.3.9"
+nix_crypto_core = { path = "../nix-crypto-core" }

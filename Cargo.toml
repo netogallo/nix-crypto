@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "nix-crypto-core",
+    "nix-crypto-plugin",
+]
+resolver = "2" 

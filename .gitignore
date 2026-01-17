@@ -5,6 +5,9 @@ result-*
 # Ignore automatically generated direnv output
 .direnv
 
+# Aider
+.env
+
 ########################################
 # CMake
 ########################################
@@ -52,7 +55,7 @@ compile_commands.json
 ########################################
 
 # Cargo output directory
-nix-crypto/target/
+target/
 
 # Cargo package metadata
 **/*.rs.bk
@@ -90,3 +93,4 @@ desktop.ini
 # Temporary files
 tmp/
 
+.aider*
