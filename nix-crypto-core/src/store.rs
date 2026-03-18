@@ -68,11 +68,11 @@ static SALT : &[u8] = "72d12af4-adf5-42f6-938f-d504210d5492".as_bytes();
 
 impl CryptoStore for ErrorStore {
 
-    fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+    fn get_raw(&self, _key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         Err(self.error.clone())
     }
 
-    fn put_raw(&self, key: &[u8], value: Vec<u8>) -> Result<(), Error> {
+    fn put_raw(&self, _key: &[u8], _value: Vec<u8>) -> Result<(), Error> {
         Err(self.error.clone())
     }
 

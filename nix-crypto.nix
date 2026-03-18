@@ -2,6 +2,16 @@
 let
   nix-main = pkgs.nixVersions.nix_2_31;
   nix-components = pkgs.nixVersions.nixComponents_2_31;
+  nix-crypto-deps = with nix-components; with pkgs; [
+    nix-store
+    nix-expr
+    nix-cmd
+    nix-fetchers
+    boost
+    cargo
+    openssl
+    nix-main
+  ];
   nix-crypto-plugin = pkgs.rustPlatform.buildRustPackage {
     pname = "nix-crypto-plugin";
     version = "0.1.0";
@@ -9,19 +19,16 @@ let
     cargoLock.lockFile = ./Cargo.lock;
     nativeBuildInputs = [ pkgs.pkg-config ];
     doCheck = false;
-    buildInputs =
-      with pkgs;
-      with nix-components; [
-        nix-store
-        nix-expr
-        nix-cmd
-        nix-fetchers
-        boost
-        cargo
-        openssl
-        nix-main
-      ]
-    ;
+    buildInputs = nix-crypto-deps;
+  };
+  nix-crypto-service = pkgs.rustPlatform.buildRustPackage {
+    pname = "nix-crypto-service";
+    version = "0.1.0";
+    src = ./.;
+    cargoLock.lockFile = ./Cargo.lock;
+    nativeBuildInputs = [ pkgs.pkg-config ];
+    doCheck = false;
+    buildInputs = nix-crypto-deps;
   };
   nix-crypto = 
     pkgs.stdenv.mkDerivation {
@@ -42,7 +49,7 @@ let
 in
   {
     packages = {
-      inherit nix-crypto-plugin nix-crypto;
+      inherit nix-crypto-plugin nix-crypto nix-crypto-service;
       default = nix-crypto;
     };
   }

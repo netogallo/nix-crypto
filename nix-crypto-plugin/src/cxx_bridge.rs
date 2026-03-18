@@ -4,12 +4,6 @@
 // related to the CXX bridge, use the cxx_support module. Function
 // implementations for the functions in this module should be placed
 // in cxx_api
-use cxx::{CxxString, UniquePtr};
-
-use nix_crypto_core::error::{Error};
-use nix_crypto_core::foundations::{CryptoNix};
-use nix_crypto_core::openssl::ffi::*;
-
 use crate::cxx_api::*;
 
 #[cxx::bridge]

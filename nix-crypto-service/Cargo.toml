@@ -1,0 +1,9 @@
+[package]
+name = "nix-crypto-service"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+docopt = "1.1"
+serde = { version = "1.0", features = ["derive"] }
+nix_crypto_core = { path = "../nix-crypto-core" }

@@ -1,11 +1,11 @@
-use std::borrow::{Borrow};
-
 use crate::args::{CryptoNixArgs, CryptoNixMode, SledModeConfig};
 use crate::error::*;
+use crate::logger::{Logger, LogLevel};
 use crate::store::*;
 
 pub struct CryptoNix {
-    store : Box<dyn CryptoStore>
+    store: Box<dyn CryptoStore>,
+    logger: Logger,
 }
 
 impl CryptoNix {
@@ -25,9 +25,33 @@ impl CryptoNix {
         key: &K
     ) -> Result<Option<<K as IsCryptoStoreKey>::Value>, Error> {
 
-        match self.store.get_raw(&self.to_store_key_raw(key)[..])? {
-            Some(vec) => Ok(Some(<K as IsCryptoStoreKey>::from_store_value_raw(&vec)?)),
-            _ => Ok(None)
+        let raw_key = self.to_store_key_raw(key);
+        let identity = self.logger.to_log_identifier(&raw_key);
+        let fn_name = "foundations::CryptoNix::get";
+
+        match self.store.get_raw(&raw_key[..])? {
+            Some(raw_value) => {
+                self.logger.log(
+                    LogLevel::Debug,
+                    "identity present",
+                    &[
+                        ("identity", &identity),
+                        ("fn", &fn_name)
+                    ],
+                );
+                Ok(Some(<K as IsCryptoStoreKey>::from_store_value_raw(&raw_value)?))
+            },
+            None => {
+                self.logger.log(
+                    LogLevel::Debug,
+                    "identity absent",
+                    &[
+                        ("identity", &identity),
+                        ("fn", &fn_name)
+                    ],
+                );
+                Ok(None)
+            },
         }
     }
 
@@ -35,8 +59,7 @@ impl CryptoNix {
         &self,
         key: &K,
         value: &<K as IsCryptoStoreKey>::Value
-    ) -> Result<(), Error>
-    where {
+    ) -> Result<(), Error> {
 
         self.store.put_raw(
             &self.to_store_key_raw(key)[..],
@@ -48,24 +71,24 @@ impl CryptoNix {
         self.store.salt()
     }
 
-    fn from_sled_config(config: &SledModeConfig) -> CryptoNix {
-
+    /// Construct a `CryptoNix` instance from a sled store configuration
+    /// and a logger.
+    pub fn from_sled_config(config: &SledModeConfig, logger: Logger) -> CryptoNix {
         match SledStore::open(&config.store_path) {
-            Ok(store) => CryptoNix { store: Box::new(store) },
-            Err(err) => Self::with_error(err)
+            Ok(store) => CryptoNix { store: Box::new(store), logger },
+            Err(err) => Self::with_error(err),
         }
     }
 
     fn from_parsed_args(args: CryptoNixArgs) -> CryptoNix {
-
         match args.mode {
-            CryptoNixMode::SledMode(sled) => Self::from_sled_config(&sled),
-            CryptoNixMode::ErrorMode(err) => Self::with_error(err)
+            CryptoNixMode::SledMode(sled) => Self::from_sled_config(&sled, args.logger),
+            CryptoNixMode::ErrorMode(err) => Self::with_error(err),
         }
     }
 
     /// Parse the arguments and build a CryptoNix instance
-    /// based on said argumetns. If the arguments cannot be parsed,
+    /// based on said arguments. If the arguments cannot be parsed,
     /// an instance will be constructed which will fail on every
     /// operation. CryptoNix, in general, uses this approach to allow
     /// enabling the plugin systemwide and not having nix crash
@@ -75,8 +98,9 @@ impl CryptoNix {
     }
 
     pub fn with_error(error: Error) -> CryptoNix {
-        CryptoNix{
-            store : Box::new(ErrorStore::from_error(error))
+        CryptoNix {
+            store: Box::new(ErrorStore::from_error(error)),
+            logger: Logger::dummy(),
         }
     }
 }

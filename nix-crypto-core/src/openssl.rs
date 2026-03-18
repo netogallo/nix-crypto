@@ -6,7 +6,8 @@ use openssl::x509::extension::{AuthorityKeyIdentifier, SubjectKeyIdentifier};
 
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
-use crate::store::{IsCryptoStoreKey};
+
+pub mod pkey_store_helpers;
 
 /// This module defines traits which describe the fields expected from
 /// CXX types. The reason why this is needed is because the "cxx" crate

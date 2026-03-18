@@ -2,5 +2,6 @@
 members = [
     "nix-crypto-core",
     "nix-crypto-plugin",
+    "nix-crypto-service"
 ]
 resolver = "2" 

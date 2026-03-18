@@ -9,9 +9,10 @@
 #include <nix/util/config-global.hh>
 #include <rust/cxx.h>
 
-#include "nix_crypto_plugin/src/cxx_bridge.rs.h"
-
+struct OpensslPrivateKeyIdentity;
+struct X509BuildParams;
 struct CxxNixCrypto;
+struct CryptoNixPrimops;
 
 struct ExtraBuiltinsSettings : nix::Config {
   nix::Setting<std::string> extraCryptoNixArgs{
@@ -49,6 +50,6 @@ class CryptoNixPrimops {
 
   rust::Box<CxxNixCrypto>& cryptoNix() noexcept;
 };
-
+extern std::unique_ptr<CryptoNixPrimops> primops;
 void init_primops();
 void destroy_primops();

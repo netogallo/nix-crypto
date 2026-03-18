@@ -1,8 +1,6 @@
 # Special file to run tests in the nix development shell with the cargo package
-{ system, nixpkgs }:
+{ system, nixpkgs, nix-crypto-service ? "$PWD/target/debug/nix-crypto-service" }:
 let
-  #flake = builtins.getFlake pwd;
-  #pkgs = import flake.inputs.nixpkgs { system = builtins.currentSystem; };
   pkgs = import nixpkgs { inherit system; };
 in
-  pkgs.callPackage ./main.nix { inherit pkgs; }
+  pkgs.callPackage ./main.nix { inherit pkgs nix-crypto-service; }

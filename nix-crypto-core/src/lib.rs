@@ -4,3 +4,4 @@ pub mod foundations;
 pub mod age;
 pub mod openssl;
 pub mod store;
+pub mod logger;

@@ -7,6 +7,7 @@ use nix_crypto_core::foundations::{CryptoNix};
 use nix_crypto_core::store::{IsCryptoStoreKey, StoreHasher};
 use nix_crypto_core::openssl::ffi;
 use nix_crypto_core::openssl::pkey;
+use nix_crypto_core::openssl::pkey_store_helpers;
 
 // Imports from this crate
 use crate::cxx_bridge::ffi::*;
@@ -147,18 +148,16 @@ impl CxxOpensslX509Certificate {
 impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
     type Value = pkey::Key;
 
-    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
-        hasher.update(self.key_type.as_bytes());
-        hasher.update(self.key_id.as_bytes());
-        Vec::from(hasher.finish())
+    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
+        pkey_store_helpers::to_store_key_raw(&self.key_type, &self.key_id, hasher)
     }
 
     fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
-        pkey::Key::key_to_pem(value)
+        pkey_store_helpers::to_store_value_raw(value)
     }
 
     fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
-        pkey::Key::key_from_pem(&bytes[..])
+        pkey_store_helpers::from_store_value_raw(bytes)
     }
 }
 

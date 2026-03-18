@@ -1,3 +1,6 @@
+/**
+  OpenSSL cryptographic operations for nix-crypto.
+*/
 { pkgs, prelude, private-key-spec-type, x509-params-type, ... }@module:
 let
   inherit (pkgs) lib;
@@ -6,6 +9,17 @@ let
   type-checker = prelude.type-checker {
     file = "${./openssl.nix}";
   };
+
+  /**
+    Produces a deterministic key identity string from an attribute set.
+    Keys are sorted alphabetically and joined as `key=value` pairs separated
+    by `&`. For example, `{ vault = "openssl"; name = "my-key"; }` produces
+    `"name=my-key&vault=openssl"`.
+
+    This string is used by both the nix-crypto plugin (to store the key) and
+    `nix-crypto-service` (to look it up). The sort order ensures the identity
+    is stable regardless of the order in which `attrs` is defined in nix.
+  */
   to-key-identity = attrs:
     let
       keys = lib.sort (a: b: a < b) (lib.attrNames attrs);
@@ -18,6 +32,12 @@ let
     in
       lib.concatStringsSep "&" (lib.map mk-entry keys)
   ;
+
+  /**
+    Build an X.509 certificate signed by the given private key.
+    Returns an attribute set with:
+    - `certificate-pem`: the certificate in PEM format.
+  */
   x509 = { key-ref, x509-params }:
   let
     x509-params-all =
@@ -29,6 +49,21 @@ let
       certificate-pem = openssl.x509-pem x509-params-all;
     }
   ;
+
+  /**
+    Retrieve or generate an OpenSSL private key.
+    Accepts a `key-spec` with:
+    - `attrs`: an attribute set of key-value pairs used to construct the key
+      identity string (e.g. `{ vault = "openssl"; name = "my-key"; }`).
+    - `type`: the key type string (e.g. `"rsa"`).
+
+    Returns an attribute set with:
+    - `identity`: the key identity string produced by `to-key-identity`. Exposed
+      so that callers (e.g. `nix-crypto-service`) can locate the key in the
+      sled store without reconstructing the identity manually.
+    - `public-key-pem`: the public key in PEM format, computed by the nix plugin.
+    - `x509`: a function to build X.509 certificates signed by this key.
+  */
   private-key-impl = key-spec:
   let
     key-ref = {
@@ -37,6 +72,7 @@ let
     };
   in
     {
+      identity = key-ref.key-identity;
       public-key-pem = openssl.public-key-pem key-ref;
       x509 =
         type-checker.function
