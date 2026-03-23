@@ -217,10 +217,18 @@ impl Logger {
         }
     }
 
+    /// In general, it is advisable to avoid logging identities
+    /// and secrets. However, this function can be used if
+    /// needed. When the logger is running in non-debug settings,
+    /// the value will be scrubbed. When the logger is running
+    /// with debug settings, the value will be logged.
+    ///
+    /// Todo: In the future, the value should be hashed before
+    /// getting logged in debug settings.
     pub fn to_log_identifier(&self, raw: &Vec<u8>) -> String {
-        /// Todo: this function should use a safe cryptographic
-        /// hash to hash the value. Afterwards return the
-        /// base64 encoding of the hash as a string
+        // Todo: this function should use a safe cryptographic
+        // hash to hash the value. Afterwards return the
+        // base64 encoding of the hash as a string
 
         if self.min_loglevel <= LogLevel::Debug {
             base64::engine::general_purpose::STANDARD.encode(&raw)

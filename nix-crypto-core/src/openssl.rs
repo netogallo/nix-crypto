@@ -7,6 +7,7 @@ use openssl::x509::extension::{AuthorityKeyIdentifier, SubjectKeyIdentifier};
 use crate::error::{Error};
 use crate::foundations::{CryptoNix};
 
+pub mod pkey;
 pub mod pkey_store_helpers;
 
 /// This module defines traits which describe the fields expected from
@@ -28,12 +29,8 @@ pub mod ffi {
 
     // Modules from this crate
     use crate::error::*;
-    use crate::store::{IsCryptoStoreKey};
 
-    pub trait IsOpensslPrivateKeyIdentity : IsCryptoStoreKey<Value = crate::openssl::pkey::Key> {
-        fn key_type(&self) -> &String;
-        fn key_id(&self) -> &String;
-    }
+    pub use crate::openssl::pkey::{IsOpensslPrivateKeyIdentity};
 
     pub trait IsX509NameItem {
         fn entry_name(&self) -> &String;
@@ -167,106 +164,6 @@ pub mod ffi {
     }
 }
 
-pub mod pkey {
-    use openssl::pkey::{PKey, Public, Private};
-    use openssl::rsa;
-
-    // Imports from this crate
-    use crate::error::{Error};
-
-    #[repr(u8)]
-    pub enum Type {
-        RsaKey = 0
-    }
-
-    impl From<u8> for Type {
-
-        fn from(value: u8) -> Type {
-
-            if value == Type::RsaKey as u8 {
-                return Type::RsaKey;
-            }
-            
-            panic!("The value {} is not a vaild RSA key type", value)
-        }
-    }
-
-    impl From<Type> for u8 {
-
-        fn from(value: Type) -> u8 {
-            value as u8
-        }
-    }
-
-    impl TryFrom<&str> for Type {
-        type Error = Error;
-
-        fn try_from(value: &str) -> Result<Type, Error> {
-
-            let error_message = format!("The value {value} is not a known openssl private key type.");
-
-            match value {
-                "rsa" => Ok(Type::RsaKey),
-                _ => Error::fail_with(error_message)
-            }
-        }
-    }
-
-    impl TryFrom<&String> for Type {
-        type Error = Error;
-
-        fn try_from(value: &String) -> Result<Type, Error> {
-            Type::try_from(value.as_str())
-        }
-    }
-
-    /// CryptoNix wrapper type around 'PKey'. The main purpose
-    /// of this struct is to provide an API that can be used
-    /// in C++ code.
-    pub struct Key {
-        pub pkey: PKey<Private>
-    }
-
-    impl Key {
-
-        pub fn key_to_pem(&self) -> Result<Vec<u8>, Error> {
-            let result = self.pkey.private_key_to_pem_pkcs8()?;
-            Ok(result)
-        }
-
-        pub fn key_from_pem(pem_bytes: &[u8]) -> Result<Self, Error> {
-            let pkey = PKey::private_key_from_pem(pem_bytes)?;
-            Ok(Self::from_openssl_pkey(pkey))
-        }
-
-        pub fn from_openssl_pkey(pkey: PKey<Private>) -> Self {
-            Key { pkey: pkey }
-        }
-
-        pub fn new(key_type : Type) -> Result<Key, Error> {
-
-            match key_type {
-                Type::RsaKey => {
-                    let rsa = rsa::Rsa::generate(4096)?;
-                    Ok(Key::from_openssl_pkey(PKey::from_rsa(rsa)?))
-                }
-            }
-        }
-
-        pub fn public_pem(self: &Self) -> Result<String, Error> {
-            let pem = self.pkey.public_key_to_pem()?;
-            let result = String::from_utf8(pem)?;
-            Ok(result)
-        }
-
-        pub fn public_key(&self) -> Result<PKey<Public>, Error> {
-	          let pem = self.pkey.public_key_to_pem()?;
-	          let result = PKey::public_key_from_pem(&pem)?;
-            Ok(result)
-        }
-    }
-}
-
 pub mod x509 {
     use openssl::x509::{X509};
 
@@ -303,17 +200,7 @@ impl CryptoNix {
         &self,
         key_identity: &T
     ) -> Result<T::Value, Error> {
-
-
-        let key_type = pkey::Type::try_from(key_identity.key_type())?;
-        match self.get(key_identity)? {
-            Some(key) => Ok(key),
-            None => {
-                let key = pkey::Key::new(key_type)?;
-                self.put(key_identity, &key)?;
-                Ok(key)
-            }
-        }
+        self.get_or_derive(key_identity)
     }
 
     /// Construct an X509 certificate. This function accepts a 'X50BuildParams'
