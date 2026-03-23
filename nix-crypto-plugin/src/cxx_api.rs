@@ -4,10 +4,9 @@ use std::boxed::{Box};
 // Imports from sister crates
 use nix_crypto_core::error::{Error};
 use nix_crypto_core::foundations::{CryptoNix};
-use nix_crypto_core::store::{IsCryptoStoreKey, StoreHasher};
 use nix_crypto_core::openssl::ffi;
-use nix_crypto_core::openssl::pkey;
-use nix_crypto_core::openssl::pkey_store_helpers;
+use nix_crypto_core::openssl::pkey::OpensslPrivateKeyIdentityWrapper;
+use nix_crypto_core::openssl::decryptable::{export_decryptable, IsOpensslSymmetricKeyIdentity};
 
 // Imports from this crate
 use crate::cxx_bridge::ffi::*;
@@ -49,6 +48,21 @@ impl ffi::IsOpensslPrivateKeyIdentity for OpensslPrivateKeyIdentity {
 
     fn key_id(&self) -> &String {
         &self.key_id
+    }
+}
+
+impl IsOpensslSymmetricKeyIdentity for OpensslSymmetricKeyIdentity {
+
+    fn key_id(&self) -> &String {
+        &self.key_id
+    }
+
+    fn key_derivation(&self) -> &String {
+        &self.key_derivation
+    }
+
+    fn iterations(&self) -> u32 {
+        self.iterations
     }
 }
 
@@ -145,22 +159,6 @@ impl CxxOpensslX509Certificate {
     }
 }
 
-impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
-    type Value = pkey::Key;
-
-    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
-        pkey_store_helpers::to_store_key_raw(&self.key_type, &self.key_id, hasher)
-    }
-
-    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
-        pkey_store_helpers::to_store_value_raw(value)
-    }
-
-    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
-        pkey_store_helpers::from_store_value_raw(bytes)
-    }
-}
-
 impl CxxNixCrypto {
 
     pub fn cxx_openssl_private_key(self: &CxxNixCrypto, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<CxxOpensslPrivateKey>, Error> {
@@ -172,5 +170,22 @@ impl CxxNixCrypto {
     pub fn cxx_openssl_x509_certificate(&self, args: X509BuildParams) -> Result<Box<CxxOpensslX509Certificate>, Error> {
         let result = self.0.openssl_x509_certificate(&args)?;
         Ok(Box::new(CxxOpensslX509Certificate(result)))
+    }
+
+    /// Export an openssl private key credential encrypted with the given symmetric key,
+    /// returning a PEM-formatted string containing the AES-128-CBC encrypted private key.
+    ///
+    /// This is a monomorphic wrapper around `export_decryptable` for the
+    /// `OpensslPrivateKeyIdentity` credential type, making it callable from C++.
+    pub fn cxx_export_decryptable_openssl_pkey(
+        &self,
+        symmetric_key: OpensslSymmetricKeyIdentity,
+        credential: OpensslPrivateKeyIdentity,
+    ) -> Result<String, Error> {
+        export_decryptable(
+            &self.0,
+            &symmetric_key,
+            &OpensslPrivateKeyIdentityWrapper(&credential),
+        )
     }
 }

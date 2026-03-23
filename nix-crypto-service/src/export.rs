@@ -4,7 +4,8 @@
 //!
 //! This module resolves the CLI arguments for `export secret`, constructs a
 //! [`CryptoNix`] instance from the sled store configuration, retrieves (or
-//! generates) the requested private key, and writes it to a file in PEM format.
+//! generates) the requested private key or symmetric key passphrase, and writes
+//! it to a file.
 //!
 //! ## Store resolution
 //!
@@ -24,14 +25,10 @@
 //! The `identity` field on the nix private key object exposes this string
 //! directly so callers do not need to reconstruct it manually.
 
-use nix_crypto_core::args::{SledModeConfig};
-use nix_crypto_core::error::Error;
-use nix_crypto_core::foundations::CryptoNix;
-use nix_crypto_core::logger::{Logger, LogLevel};
 use nix_crypto_core::openssl::ffi::IsOpensslPrivateKeyIdentity;
-use nix_crypto_core::openssl::pkey;
-use nix_crypto_core::openssl::pkey_store_helpers;
-use nix_crypto_core::store::{IsCryptoStoreKey, StoreHasher};
+use nix_crypto_core::openssl::decryptable::IsOpensslSymmetricKeyIdentity;
+
+use crate::common::{Error, NixCryptoArgs};
 
 /// The supported identity types for the `export secret` subcommand.
 pub enum IdentityType {
@@ -39,40 +36,36 @@ pub enum IdentityType {
     ///
     /// - `pkey_type`: the key type (e.g. `"rsa"`).
     /// - `pkey_id`: the key identity string (e.g. `"name=my-key&vault=openssl"`).
-    OpensslPkey { pkey_type: String, pkey_id: String },
+    OpensslPkey {
+        pkey_type: String,
+        pkey_id: String,
+    },
+    /// An OpenSSL symmetric key identity. The passphrase (random secret) for
+    /// this key will be retrieved from the store and written to the output file.
+    ///
+    /// - `key_id`: a unique identifier for the symmetric key.
+    /// - `key_derivation`: the key derivation scheme (e.g. `"pbkdf2"`).
+    /// - `iterations`: the number of iterations for the key derivation function.
+    OpensslSymmetricKey {
+        key_id: String,
+        key_derivation: String,
+        iterations: u32,
+    },
 }
 
 /// The resolved arguments for the `export secret` subcommand.
 pub struct ExportArgs {
-    /// Path to the sled store on the filesystem.
-    pub sled_store: String,
     /// The identity of the secret to export.
     pub identity_type: IdentityType,
-    /// The file path to write the exported PEM private key to.
+    /// The file path to write the exported secret to.
     pub output_file: String,
-    /// The logger to use for this invocation.
-    pub logger: Logger,
+    /// The arguments used to build the `CryptoNix` instance.
+    pub nix_crypto_args: NixCryptoArgs,
 }
 
 struct OpensslPkeyIdentity {
     pkey_type: String,
     pkey_id: String,
-}
-
-impl IsCryptoStoreKey for OpensslPkeyIdentity {
-    type Value = pkey::Key;
-
-    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
-        pkey_store_helpers::to_store_key_raw(&self.pkey_type, &self.pkey_id, hasher)
-    }
-
-    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
-        pkey_store_helpers::to_store_value_raw(value)
-    }
-
-    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
-        pkey_store_helpers::from_store_value_raw(bytes)
-    }
 }
 
 impl IsOpensslPrivateKeyIdentity for OpensslPkeyIdentity {
@@ -85,111 +78,118 @@ impl IsOpensslPrivateKeyIdentity for OpensslPkeyIdentity {
     }
 }
 
-/// Resolves the sled store path from the `--sled-store` flag or from the
-/// `NIX_CRYPTO_STORE` environment variable (`sled:<path>`).
-fn resolve_sled_store(flag_sled_store: Option<String>) -> Result<String, String> {
-    if let Some(path) = flag_sled_store {
-        return Ok(path);
+struct OpensslSymmetricKeyIdentity {
+    key_id: String,
+    key_derivation: String,
+    iterations: u32,
+}
+
+impl IsOpensslSymmetricKeyIdentity for OpensslSymmetricKeyIdentity {
+    fn key_id(&self) -> &String {
+        &self.key_id
     }
 
-    match std::env::var("NIX_CRYPTO_STORE") {
-        Ok(val) => {
-            if let Some(path) = val.strip_prefix("sled:") {
-                Ok(path.to_string())
-            } else {
-                Err(format!(
-                    "NIX_CRYPTO_STORE value '{}' is not in the expected format 'sled:<store path>'",
-                    val
-                ))
-            }
-        }
-        Err(_) => Err(
-            "No store specified. Use --sled-store or set NIX_CRYPTO_STORE=sled:<store path>"
-                .to_string(),
-        ),
+    fn key_derivation(&self) -> &String {
+        &self.key_derivation
+    }
+
+    fn iterations(&self) -> u32 {
+        self.iterations
     }
 }
 
-/// Resolves the identity type from the `--identity-type`, `--openssl-pkey-type`
-/// and `--openssl-pkey-id` flags. Currently only `openssl-pkey` is supported.
+const DEFAULT_KEY_DERIVATION: &str = "pbkdf2";
+const DEFAULT_ITERATIONS: u32 = 600_000;
+
+/// Resolves the identity type from the `--identity-type`, `--openssl-pkey-type`,
+/// `--openssl-pkey-id`, `--openssl-symmetric-key-id`,
+/// `--openssl-symmetric-key-derivation` and `--openssl-symmetric-key-iterations`
+/// flags. Supported identity types are `openssl-pkey` and `openssl-symmetric-key`.
 fn resolve_identity_type(
     flag_identity_type: Option<String>,
     flag_openssl_pkey_type: Option<String>,
     flag_openssl_pkey_id: Option<String>,
-) -> Result<IdentityType, String> {
+    flag_openssl_symmetric_key_id: Option<String>,
+    flag_openssl_symmetric_key_derivation: Option<String>,
+    flag_openssl_symmetric_key_iterations: Option<String>,
+) -> Result<IdentityType, Error> {
     match flag_identity_type.as_deref() {
         Some("openssl-pkey") => {
-            let pkey_type = flag_openssl_pkey_type.ok_or(
-                "--openssl-pkey-type is required when --identity-type is 'openssl-pkey'"
-            )?;
-            let pkey_id = flag_openssl_pkey_id.ok_or(
-                "--openssl-pkey-id is required when --identity-type is 'openssl-pkey'"
-            )?;
+            let pkey_type = flag_openssl_pkey_type.ok_or_else(|| Error::argument_error(
+                "--openssl-pkey-type is required when --identity-type is 'openssl-pkey'".to_string()
+            ))?;
+            let pkey_id = flag_openssl_pkey_id.ok_or_else(|| Error::argument_error(
+                "--openssl-pkey-id is required when --identity-type is 'openssl-pkey'".to_string()
+            ))?;
             Ok(IdentityType::OpensslPkey { pkey_type, pkey_id })
         }
-        Some(other) => Err(format!(
-            "Unrecognised identity type '{}'. Supported types are: openssl-pkey",
+        Some("openssl-symmetric-key") => {
+            let key_id = flag_openssl_symmetric_key_id.ok_or_else(|| Error::argument_error(
+                "--openssl-symmetric-key-id is required when --identity-type is 'openssl-symmetric-key'".to_string()
+            ))?;
+            let key_derivation = flag_openssl_symmetric_key_derivation
+                .unwrap_or_else(|| DEFAULT_KEY_DERIVATION.to_string());
+            let iterations = match flag_openssl_symmetric_key_iterations {
+                None => DEFAULT_ITERATIONS,
+                Some(s) => s.parse::<u32>().map_err(|_| Error::argument_error(
+                    format!("--openssl-symmetric-key-iterations must be a positive integer, got '{}'", s)
+                ))?,
+            };
+            Ok(IdentityType::OpensslSymmetricKey { key_id, key_derivation, iterations })
+        }
+        Some(other) => Err(Error::argument_error(format!(
+            "Unrecognised identity type '{}'. Supported types are: openssl-pkey, openssl-symmetric-key",
             other
+        ))),
+        None => Err(Error::argument_error(
+            "--identity-type is required for export secret".to_string()
         )),
-        None => Err("--identity-type is required for export secret".to_string()),
-    }
-}
-
-/// Resolves the logger from the `--log-file` and `--log-level` flags.
-fn resolve_logger(
-    flag_log_file: Option<String>,
-    flag_log_level: Option<String>,
-) -> Result<Logger, String> {
-    let log_level = match flag_log_level.as_deref() {
-        None | Some("") => LogLevel::Info,
-        Some(level) => LogLevel::from_str(level)?,
-    };
-
-    match flag_log_file {
-        None => Ok(Logger::dummy()),
-        Some(path) => Logger::file(&path, log_level),
     }
 }
 
 /// Resolves all CLI flags into an [`ExportArgs`] struct.
 pub fn resolve_args(
-    flag_sled_store: Option<String>,
+    nix_crypto_args: NixCryptoArgs,
     flag_identity_type: Option<String>,
     flag_openssl_pkey_type: Option<String>,
     flag_openssl_pkey_id: Option<String>,
+    flag_openssl_symmetric_key_id: Option<String>,
+    flag_openssl_symmetric_key_derivation: Option<String>,
+    flag_openssl_symmetric_key_iterations: Option<String>,
     flag_output_file: Option<String>,
-    flag_log_file: Option<String>,
-    flag_log_level: Option<String>,
-) -> Result<ExportArgs, String> {
-    let sled_store = resolve_sled_store(flag_sled_store)?;
+) -> Result<ExportArgs, Error> {
     let identity_type = resolve_identity_type(
         flag_identity_type,
         flag_openssl_pkey_type,
         flag_openssl_pkey_id,
+        flag_openssl_symmetric_key_id,
+        flag_openssl_symmetric_key_derivation,
+        flag_openssl_symmetric_key_iterations,
     )?;
-    let output_file = flag_output_file
-        .ok_or("--output-file is required for export secret")?;
-    let logger = resolve_logger(flag_log_file, flag_log_level)?;
+
+    let output_file = flag_output_file.ok_or_else(|| Error::argument_error(
+        "--output-file is required for export secret".to_string()
+    ))?;
 
     Ok(ExportArgs {
-        sled_store,
         identity_type,
         output_file,
-        logger,
+        nix_crypto_args,
     })
 }
 
 /// Runs the `export secret` subcommand.
 ///
 /// Constructs a [`CryptoNix`] instance from the sled store configuration,
-/// retrieves (or generates) the private key identified by [`ExportArgs::identity_type`],
-/// converts it to PEM format, and writes it to [`ExportArgs::output_file`].
-pub fn run_secret(args: ExportArgs) -> Result<(), String> {
-    let sled_config = SledModeConfig {
-        store_path: args.sled_store.clone(),
-    };
+/// retrieves (or generates) the secret identified by [`ExportArgs::identity_type`],
+/// and writes it to [`ExportArgs::output_file`].
+///
+/// - For `openssl-pkey`: retrieves the private key and writes it as PEM.
+/// - For `openssl-symmetric-key`: retrieves the passphrase (random secret) and
+///   writes it as a plain string.
+pub fn run_secret(args: ExportArgs) -> Result<(), Error> {
 
-    let crypto_nix = CryptoNix::from_sled_config(&sled_config, args.logger);
+    let crypto_nix = args.nix_crypto_args.init()?;
 
     match args.identity_type {
         IdentityType::OpensslPkey { pkey_type, pkey_id } => {
@@ -197,19 +197,32 @@ pub fn run_secret(args: ExportArgs) -> Result<(), String> {
 
             let key = crypto_nix
                 .openssl_private_key(&identity)
-                .map_err(|e| format!("Failed to obtain private key: {}", e))?;
+                .map_err(|e| Error::argument_error(format!("Failed to obtain private key: {}", e)))?;
 
             let pem_bytes = key
                 .key_to_pem()
-                .map_err(|e| format!("Failed to convert key to PEM: {}", e))?;
+                .map_err(|e| Error::argument_error(format!("Failed to convert key to PEM: {}", e)))?;
 
             let pem_string = String::from_utf8(pem_bytes)
-                .map_err(|e| format!("Failed to convert PEM bytes to string: {}", e))?;
+                .map_err(|e| Error::argument_error(format!("Failed to convert PEM bytes to string: {}", e)))?;
 
             std::fs::write(&args.output_file, pem_string)
-                .map_err(|e| format!("Failed to write key to '{}': {}", args.output_file, e))?;
+                .map_err(|e| Error::argument_error(format!("Failed to write key to '{}': {}", args.output_file, e)))?;
 
-            println!("Successfully exported key to '{}'", args.output_file);
+            println!("Successfully exported private key to '{}'", args.output_file);
+            Ok(())
+        }
+        IdentityType::OpensslSymmetricKey { key_id, key_derivation, iterations } => {
+            let identity = OpensslSymmetricKeyIdentity { key_id, key_derivation, iterations };
+
+            let passphrase = crypto_nix
+                .openssl_symmetric_key_passphrase(&identity)
+                .map_err(|e| Error::argument_error(format!("Failed to obtain symmetric key passphrase: {}", e)))?;
+
+            std::fs::write(&args.output_file, passphrase)
+                .map_err(|e| Error::argument_error(format!("Failed to write passphrase to '{}': {}", args.output_file, e)))?;
+
+            println!("Successfully exported symmetric key passphrase to '{}'", args.output_file);
             Ok(())
         }
     }

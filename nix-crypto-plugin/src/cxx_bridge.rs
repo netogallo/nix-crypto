@@ -19,6 +19,15 @@ pub mod ffi {
         pub key_id : String
     }
 
+    /// This struct defines a symmetric key identity for openssl. It contains
+    /// all the information needed to derive and reference a symmetric key
+    /// used for encrypting credentials via `export_decryptable`.
+    pub struct OpensslSymmetricKeyIdentity {
+        pub key_id: String,
+        pub key_derivation: String,
+        pub iterations: u32,
+    }
+
     pub struct X509NameItem {
         pub entry_name: String,
         pub entry_value: String
@@ -105,6 +114,8 @@ pub mod ffi {
         fn cxx_openssl_private_key(self: &CxxNixCrypto, key_identity: OpensslPrivateKeyIdentity) -> Result<Box<CxxOpensslPrivateKey>>;
 
         fn cxx_openssl_x509_certificate(self: &CxxNixCrypto, args: X509BuildParams) -> Result<Box<CxxOpensslX509Certificate>>;
+
+        fn cxx_export_decryptable_openssl_pkey(self: &CxxNixCrypto, symmetric_key: OpensslSymmetricKeyIdentity, credential: OpensslPrivateKeyIdentity) -> Result<String>;
 
         fn public_pem(self: &CxxOpensslPrivateKey) -> Result<String>;
 

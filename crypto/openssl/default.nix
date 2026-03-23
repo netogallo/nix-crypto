@@ -5,6 +5,7 @@ let
     main = self.callPackage ./main.nix {};
     x509-params-type = self.callPackage ./x509-params-type.nix {};
     private-key-spec-type = self.callPackage ./private-key-spec-type.nix {};
+    export-decryptable-pkey-params-type = self.callPackage ./export-decryptable-pkey-params-type.nix {};
   });
 in
   modules.main

@@ -10,6 +10,7 @@
 #include <rust/cxx.h>
 
 struct OpensslPrivateKeyIdentity;
+struct OpensslSymmetricKeyIdentity;
 struct X509BuildParams;
 struct CxxNixCrypto;
 struct CryptoNixPrimops;
@@ -30,6 +31,10 @@ class CryptoNixPrimops {
 
   std::string opensslPublicKeyPem(OpensslPrivateKeyIdentity&& key_identity);
   std::string opensslX509Pem(X509BuildParams&& buildParams);
+  std::string opensslExportDecryptableOpensslPkey(
+    OpensslSymmetricKeyIdentity&& symmetric_key,
+    OpensslPrivateKeyIdentity&& credential
+  );
 
   private:
   //nix::RegisterPrimOp age;

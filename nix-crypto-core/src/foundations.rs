@@ -8,10 +8,40 @@ pub struct CryptoNix {
     logger: Logger,
 }
 
+/// This trait is meant to represent store keys which can be
+/// used to derive the value which they intent to represent.
+/// Many store keys have that property as they are usually
+/// compromise a full spec of parameters that can be used
+/// to derive a valid instance of the underlying value.
+pub trait IsCryptoStoreKeyDerivable : IsCryptoStoreKey {
+
+    fn derive(&self) -> Result<<Self as IsCryptoStoreKey>::Value, Error>;
+}
+
+pub struct AsDerivable<'a, T>(&'a T);
+
+impl<'a, T : IsCryptoStoreKey> IsCryptoStoreKey for AsDerivable<'a, T> {
+    type Value = <T as IsCryptoStoreKey>::Value;
+
+    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
+        self.0.to_store_key_raw(hasher)
+    }
+
+    fn to_store_value_raw(value: &Self::Value) -> Result<Vec<u8>, Error> {
+        <T as IsCryptoStoreKey>::to_store_value_raw(value)
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<Self::Value, Error> {
+        <T as IsCryptoStoreKey>::from_store_value_raw(value)
+    }
+}
+
 impl CryptoNix {
 
+    /// Get a byte Vector which uniquely represents the given
+    /// `IsCryptoStoreKey` instance.
     fn to_store_key_raw<Key: IsCryptoStoreKey>(&self, key: &Key) -> Vec<u8> {
-        let hasher = StoreHasher::init(&self.salt());
+        let hasher = StoreHasher::init(self.salt());
         key.to_store_key_raw(hasher)
     }
 
@@ -52,6 +82,28 @@ impl CryptoNix {
                 );
                 Ok(None)
             },
+        }
+    }
+
+    pub fn get_or_derive<K: IsCryptoStoreKeyDerivable>(
+        &self,
+        key: &K
+    ) -> Result<<K as IsCryptoStoreKey>::Value, Error> {
+
+        match self.get(key)? {
+            Some(raw_value) => Ok(raw_value),
+            None => {
+                self.logger.log(
+                    LogLevel::Debug,
+                    "deriving value",
+                    &[
+                        ("fn", "foundations::CryptoNix::get_or_derive")
+                    ],
+                );
+                let value = key.derive()?;
+                self.put(key, &value)?;
+                Ok(value)
+            }
         }
     }
 
