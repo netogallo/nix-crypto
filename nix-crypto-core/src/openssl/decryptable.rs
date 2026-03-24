@@ -94,7 +94,7 @@ pub trait IsOpensslSymmetricKeyIdentity : IsCryptoStoreKey<Value = SymmetricKeyV
 /// A newtype wrapper around a reference to any `IsOpensslSymmetricKeyIdentity`
 /// implementor. This exists solely to provide a single, non-conflicting
 /// `IsCryptoStoreKeyDerivable` impl for symmetric keys.
-pub struct SymmetricKeyDerivable<'a, T: IsOpensslSymmetricKeyIdentity>(&'a T);
+struct SymmetricKeyDerivable<'a, T: IsOpensslSymmetricKeyIdentity>(&'a T);
 
 impl<'a, T: IsOpensslSymmetricKeyIdentity> SymmetricKeyDerivable<'a, T> {
     pub fn new(inner: &'a T) -> Self {
