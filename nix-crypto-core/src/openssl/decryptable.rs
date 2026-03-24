@@ -1,45 +1,306 @@
-// The objective of this module is to define a method for the `CryptoNix`
-// struct that allows safely exporting private credentials in the store
-// by encrypting the values with a symmetric key that will reside in the store.
-// Several steps are needed to achieve this.
-// First, a `Decryptable` trait should be defined. This trait should have
-// one method called `export` which determines how a credential is to
-// be represented as a byte vector when getting exported as a decryptable. This
-// is not the encrypted representation, rather the representation that will get
-// encrypted later. One instance of this trait is to be defined for the
-// `crate::openssl::pkey::Key` which should export a utf-8 representation
-// of the pkcs8 pem of the key. The `crate::openssl::pkey::Key` struct already
-// has a function to do this called `key_to_pem`, which is what should be used.
-// The next step is to define a trait to identify openssl symmetric keys.
-// Simiar to the existing `crate::openssl::pkey::IsOpensslPrivateKey` a new
-// trait called `IsOpensslSymmetricKeyIdentity` needs to be defined. This trait
-// will have two attributes:
-//  1. `key_id` which will be a string that serves as the identity of the symmetric
-//      key.
-//  2. `key_derivation` which will indicate how the private key is to be derived
-//      as the private keys should be representable as a `String`. At present,
-//      the only supported derivation scheme will be "pbkdf2". Note that this
-//      field should be a string, not an enum as, ulitmately, it will be supplied
-//      from a nix expression.
-// Additionally, any instance of `IsOpensslSymmetricKeyIdentity` should also
-// be an instance of `crate::foundations::IsCryptoStoreKeyDerivable` such that
-// the derive method generates a secure random string or reasonable length. Define
-// a dedicated struct to store the random string and the key derivation scheme.
-//
-// With the above items, it is then possible to define the `export_decryptable`
-// method for `CryptoNix`. This method should accept two argumetns:
-//  1. `key` which will be any value implementing the `IsOpensslSymmetricKeyIdentity`
-//      trait.
-//  2. `credential` which is any value implementing the
-//      `crate::foundations::IsCryptoStoreKeyDerivable` such that the `Value` type
-//      argument implements the `Decryptable` trait.
-// It will then use the arguments as follows:
-//  1. Use the `CryptoNix::get_or_derive` method to obtain the underlying symmetric
-//      key for the `key` argument.
-//  2. Use the `CryptoNix::get_or_derive` method to obtain the underlying credential
-//      for the `credential` argument.
-//  3. Use the `export` method of the underlying credential to generate the
-//      string representation of the credential.
-//  4. Use the symmetic key from step 1 and the corresponding key derivation scheme
-//      to encrypt the credential. The output should be a String containing the
-//      encrypted data in the PEM format.
+use openssl::pkcs5::pbkdf2_hmac;
+use openssl::hash::MessageDigest;
+use openssl::symm::{encrypt, Cipher};
+use openssl::rand::rand_bytes;
+
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+
+use crate::error::Error;
+use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
+use crate::store::{IsCryptoStoreKey, StoreHasher};
+use crate::openssl::pkey;
+
+// ============================================================================
+// Decryptable trait
+// ============================================================================
+
+/// A `Decryptable` value can be represented as a byte vector for the purpose
+/// of encryption. This is the plaintext representation that will be encrypted,
+/// not the encrypted representation itself.
+pub trait Decryptable {
+    fn export(&self) -> Result<Vec<u8>, Error>;
+}
+
+impl Decryptable for pkey::Key {
+    fn export(&self) -> Result<Vec<u8>, Error> {
+        self.key_to_pem()
+    }
+}
+
+// ============================================================================
+// SymmetricKeyValue
+// ============================================================================
+
+/// The value stored in the `CryptoStore` for a symmetric key. Contains the
+/// randomly generated secret, the key derivation scheme, and the iteration
+/// count used for PBKDF2.
+pub struct SymmetricKeyValue {
+    pub random_secret: String,
+    pub key_derivation: String,
+    pub iterations: u32,
+}
+
+impl SymmetricKeyValue {
+    /// Serialize to bytes as `<key_derivation>:<iterations>:<random_secret>`.
+    fn to_bytes(&self) -> Vec<u8> {
+        format!("{}:{}:{}", self.key_derivation, self.iterations, self.random_secret)
+            .into_bytes()
+    }
+
+    /// Deserialize from bytes produced by `to_bytes`.
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let s = std::str::from_utf8(bytes)?;
+
+        // Split into at most 3 parts so the random_secret can itself contain ':'
+        let mut parts = s.splitn(3, ':');
+
+        let key_derivation = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing key_derivation in SymmetricKeyValue".to_string()))?
+            .to_string();
+
+        let iterations_str = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing iterations in SymmetricKeyValue".to_string()))?;
+
+        let iterations = iterations_str
+            .parse::<u32>()
+            .map_err(|_| Error::from_message(format!("Invalid iterations value: {}", iterations_str)))?;
+
+        let random_secret = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing random_secret in SymmetricKeyValue".to_string()))?
+            .to_string();
+
+        Ok(SymmetricKeyValue { random_secret, key_derivation, iterations })
+    }
+}
+
+// ============================================================================
+// IsOpensslSymmetricKeyIdentity
+// ============================================================================
+
+/// Identifies an OpenSSL symmetric key. Implementors provide the key identity,
+/// derivation scheme, and PBKDF2 iteration count. The underlying
+/// `SymmetricKeyValue` (including the random secret) is derived and stored
+/// automatically via the blanket impl of `IsCryptoStoreKeyDerivable`.
+pub trait IsOpensslSymmetricKeyIdentity : IsCryptoStoreKey<Value = SymmetricKeyValue> {
+    fn key_id(&self) -> &String;
+    fn key_derivation(&self) -> &String;
+    fn iterations(&self) -> u32;
+}
+
+impl<T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable for T {
+    fn derive(&self) -> Result<SymmetricKeyValue, Error> {
+        // Generate a cryptographically secure random secret (32 bytes -> 64 hex chars)
+        let mut random_bytes = vec![0u8; 32];
+        rand_bytes(&mut random_bytes)?;
+        let random_secret = hex::encode(&random_bytes);
+
+        Ok(SymmetricKeyValue {
+            random_secret,
+            key_derivation: self.key_derivation().clone(),
+            iterations: self.iterations(),
+        })
+    }
+}
+
+/// Serialization helpers for `SymmetricKeyValue`. These are free functions
+/// rather than a blanket impl because Rust does not allow blanket impls of
+/// `IsCryptoStoreKey` on trait objects.
+pub fn symmetric_key_to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
+    Ok(value.to_bytes())
+}
+
+pub fn symmetric_key_from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
+    SymmetricKeyValue::from_bytes(value)
+}
+
+// ============================================================================
+// EncryptionParams
+// ============================================================================
+
+/// Stores the salt and IV used to encrypt a specific `(symmetric_key, credential)`
+/// pair. By persisting these in the store we guarantee that calling
+/// `export_decryptable` with the same key, credential, and store always
+/// produces identical output.
+pub struct EncryptionParams {
+    pub salt: Vec<u8>,
+    pub iv: Vec<u8>,
+}
+
+impl EncryptionParams {
+    fn generate() -> Result<Self, Error> {
+        let mut salt = vec![0u8; 8];
+        let mut iv = vec![0u8; 16];
+        rand_bytes(&mut salt)?;
+        rand_bytes(&mut iv)?;
+        Ok(EncryptionParams { salt, iv })
+    }
+
+    /// Serialize as `<salt_len_1_byte><salt><iv>`.
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.salt.len() as u8);
+        bytes.extend_from_slice(&self.salt);
+        bytes.extend_from_slice(&self.iv);
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.is_empty() {
+            return Err(Error::from_message("EncryptionParams bytes are empty".to_string()));
+        }
+
+        let salt_len = bytes[0] as usize;
+
+        if bytes.len() < 1 + salt_len {
+            return Err(Error::from_message("EncryptionParams bytes too short for salt".to_string()));
+        }
+
+        let salt = bytes[1..1 + salt_len].to_vec();
+        let iv = bytes[1 + salt_len..].to_vec();
+
+        Ok(EncryptionParams { salt, iv })
+    }
+}
+
+/// The store key for `EncryptionParams`. It is derived by hashing the raw
+/// store keys of both the symmetric key identity and the credential identity,
+/// making it unique per `(key, credential)` pair.
+pub struct EncryptionParamsKey {
+    raw_key_key: Vec<u8>,
+    raw_credential_key: Vec<u8>,
+}
+
+impl EncryptionParamsKey {
+    pub fn new(raw_key_key: Vec<u8>, raw_credential_key: Vec<u8>) -> Self {
+        EncryptionParamsKey { raw_key_key, raw_credential_key }
+    }
+}
+
+impl IsCryptoStoreKey for EncryptionParamsKey {
+    type Value = EncryptionParams;
+
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        hasher.update(b"encryption_params");
+        hasher.update(&self.raw_key_key);
+        hasher.update(&self.raw_credential_key);
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &EncryptionParams) -> Result<Vec<u8>, Error> {
+        Ok(value.to_bytes())
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<EncryptionParams, Error> {
+        EncryptionParams::from_bytes(value)
+    }
+}
+
+impl IsCryptoStoreKeyDerivable for EncryptionParamsKey {
+    fn derive(&self) -> Result<EncryptionParams, Error> {
+        EncryptionParams::generate()
+    }
+}
+
+// ============================================================================
+// Encryption helpers
+// ============================================================================
+
+const PEM_HEADER: &str = "-----BEGIN ENCRYPTED DATA-----";
+const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
+
+/// Derive a 256-bit AES key from a passphrase using PBKDF2-SHA256.
+fn derive_aes_key(passphrase: &str, salt: &[u8], iterations: u32) -> Result<Vec<u8>, Error> {
+    let mut key = vec![0u8; 32];
+    pbkdf2_hmac(
+        passphrase.as_bytes(),
+        salt,
+        iterations as usize,
+        MessageDigest::sha256(),
+        &mut key,
+    )?;
+    Ok(key)
+}
+
+/// Encrypt `plaintext` with AES-256-CBC and return a PEM-encoded string.
+///
+/// The payload layout matches the OpenSSL `enc` format:
+///   `Salted__` (8 bytes) | salt (8 bytes) | ciphertext
+/// The whole payload is Base64-encoded and wrapped in a PEM envelope.
+fn encrypt_to_pem(
+    plaintext: &[u8],
+    passphrase: &str,
+    salt: &[u8],
+    iv: &[u8],
+    iterations: u32,
+) -> Result<String, Error> {
+    let key = derive_aes_key(passphrase, salt, iterations)?;
+    let cipher = Cipher::aes_256_cbc();
+    let ciphertext = encrypt(cipher, &key, Some(iv), plaintext)?;
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(b"Salted__");
+    payload.extend_from_slice(salt);
+    payload.extend_from_slice(&ciphertext);
+
+    let b64 = STANDARD.encode(&payload);
+
+    // Wrap Base64 at 64 characters per line, as is standard for PEM
+    let pem_body = b64
+        .as_bytes()
+        .chunks(64)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(format!("{}\n{}\n{}", PEM_HEADER, pem_body, PEM_FOOTER))
+}
+
+// ============================================================================
+// export_decryptable
+// ============================================================================
+
+/// Export a credential encrypted with a symmetric key, returning a
+/// PEM-formatted string containing the AES-256-CBC encrypted credential.
+///
+/// Calling this function multiple times with the same `key`, `credential`,
+/// and store will always produce identical output, because the salt and IV
+/// are stored in the `CryptoStore` on the first call and reused thereafter.
+pub fn export_decryptable<K, C>(
+    crypto_nix: &CryptoNix,
+    key: &K,
+    credential: &C,
+) -> Result<String, Error>
+where
+    K: IsOpensslSymmetricKeyIdentity,
+    C: IsCryptoStoreKeyDerivable,
+    C::Value: Decryptable,
+{
+    // Step 1: Get or derive the symmetric key value (random_secret, derivation, iterations)
+    let symmetric_key_value = crypto_nix.get_or_derive(key)?;
+
+    // Step 2: Get or derive the credential value
+    let credential_value = crypto_nix.get_or_derive(credential)?;
+
+    // Step 3: Build the EncryptionParamsKey from the raw store keys of both
+    // the symmetric key and the credential, then get or derive the params.
+    let raw_key_key = crypto_nix.to_store_key_raw_pub(key);
+    let raw_credential_key = crypto_nix.to_store_key_raw_pub(credential);
+    let encryption_params_key = EncryptionParamsKey::new(raw_key_key, raw_credential_key);
+    let encryption_params = crypto_nix.get_or_derive(&encryption_params_key)?;
+
+    // Step 4: Export the credential to plaintext bytes
+    let plaintext = credential_value.export()?;
+
+    // Step 5: Encrypt and return as PEM
+    encrypt_to_pem(
+        &plaintext,
+        &symmetric_key_value.random_secret,
+        &encryption_params.salt,
+        &encryption_params.iv,
+        symmetric_key_value.iterations,
+    )
+}

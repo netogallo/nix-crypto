@@ -25,6 +25,13 @@ impl CryptoNix {
         key.to_store_key_raw(hasher)
     }
 
+    /// Public wrapper around `to_store_key_raw`. Needed by external modules
+    /// such as `decryptable` that must compute raw store keys in order to
+    /// build composite keys (e.g. `EncryptionParamsKey`).
+    pub fn to_store_key_raw_pub<Key: IsCryptoStoreKey>(&self, key: &Key) -> Vec<u8> {
+        self.to_store_key_raw(key)
+    }
+
     /// Try getting a value from the 'CryptoStore' which is associated
     /// with the 'key' parameter. If the value does not exist in the
     /// store, 'Nothing' is returned. Otherwise the value gets returned.

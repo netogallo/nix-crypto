@@ -5,10 +5,11 @@ use openssl::x509::{X509Builder};
 use openssl::x509::extension::{AuthorityKeyIdentifier, SubjectKeyIdentifier};
 
 use crate::error::{Error};
-use crate::foundations::{CryptoNix};
+use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
 
 pub mod pkey;
 pub mod pkey_store_helpers;
+pub mod decryptable;
 
 /// This module defines traits which describe the fields expected from
 /// CXX types. The reason why this is needed is because the "cxx" crate
@@ -259,5 +260,20 @@ impl CryptoNix {
         builder.sign(&signing_key.pkey, MessageDigest::sha256())?;
 
         Ok(x509::X509Certificate::new(builder.build()))
+    }
+
+    /// Export a credential encrypted with a symmetric key, returning a
+    /// PEM-formatted string. All logic is delegated to the `decryptable` module.
+    pub fn export_decryptable<K, C>(
+        &self,
+        key: &K,
+        credential: &C,
+    ) -> Result<String, Error>
+    where
+        K: decryptable::IsOpensslSymmetricKeyIdentity,
+        C: IsCryptoStoreKeyDerivable,
+        C::Value: decryptable::Decryptable,
+    {
+        decryptable::export_decryptable(self, key, credential)
     }
 }
