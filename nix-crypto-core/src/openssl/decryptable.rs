@@ -21,10 +21,25 @@
 //      the only supported derivation scheme will be "pbkdf2". Note that this
 //      field should be a string, not an enum as, ulitmately, it will be supplied
 //      from a nix expression.
+// Additionally, any instance of `IsOpensslSymmetricKeyIdentity` should also
+// be an instance of `crate::foundations::IsCryptoStoreKeyDerivable` such that
+// the derive method generates a secure random string or reasonable length. Define
+// a dedicated struct to store the random string and the key derivation scheme.
+//
 // With the above items, it is then possible to define the `export_decryptable`
 // method for `CryptoNix`. This method should accept two argumetns:
 //  1. `key` which will be any value implementing the `IsOpensslSymmetricKeyIdentity`
 //      trait.
-//  2. `credential` which is any value implementing the `IsCryptoStoreKey` such that
-//      the `Value` type argument implements the `Decryptable` trait.
-// The
+//  2. `credential` which is any value implementing the
+//      `crate::foundations::IsCryptoStoreKeyDerivable` such that the `Value` type
+//      argument implements the `Decryptable` trait.
+// It will then use the arguments as follows:
+//  1. Use the `CryptoNix::get_or_derive` method to obtain the underlying symmetric
+//      key for the `key` argument.
+//  2. Use the `CryptoNix::get_or_derive` method to obtain the underlying credential
+//      for the `credential` argument.
+//  3. Use the `export` method of the underlying credential to generate the
+//      string representation of the credential.
+//  4. Use the symmetic key from step 1 and the corresponding key derivation scheme
+//      to encrypt the credential. The output should be a String containing the
+//      encrypted data in the PEM format.
