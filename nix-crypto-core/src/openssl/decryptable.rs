@@ -93,10 +93,10 @@ pub trait IsOpensslSymmetricKeyIdentity : IsCryptoStoreKey<Value = SymmetricKeyV
 
 impl<T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable for T {
     fn derive(&self) -> Result<SymmetricKeyValue, Error> {
-        // Generate a cryptographically secure random secret (32 bytes -> 64 hex chars)
+        // Generate a cryptographically secure random secret (32 bytes -> 44 base64 chars)
         let mut random_bytes = vec![0u8; 32];
         rand_bytes(&mut random_bytes)?;
-        let random_secret = hex::encode(&random_bytes);
+        let random_secret = STANDARD.encode(&random_bytes);
 
         Ok(SymmetricKeyValue {
             random_secret,
