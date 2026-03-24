@@ -84,24 +84,50 @@ impl SymmetricKeyValue {
 /// Identifies an OpenSSL symmetric key. Implementors provide the key identity,
 /// derivation scheme, and PBKDF2 iteration count. The underlying
 /// `SymmetricKeyValue` (including the random secret) is derived and stored
-/// automatically via the blanket impl of `IsCryptoStoreKeyDerivable`.
+/// automatically.
 pub trait IsOpensslSymmetricKeyIdentity : IsCryptoStoreKey<Value = SymmetricKeyValue> {
     fn key_id(&self) -> &String;
     fn key_derivation(&self) -> &String;
     fn iterations(&self) -> u32;
 }
 
-impl<T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable for T {
+/// A newtype wrapper around a reference to any `IsOpensslSymmetricKeyIdentity`
+/// implementor. This exists solely to provide a single, non-conflicting
+/// `IsCryptoStoreKeyDerivable` impl for symmetric keys.
+pub struct SymmetricKeyDerivable<'a, T: IsOpensslSymmetricKeyIdentity>(&'a T);
+
+impl<'a, T: IsOpensslSymmetricKeyIdentity> SymmetricKeyDerivable<'a, T> {
+    pub fn new(inner: &'a T) -> Self {
+        SymmetricKeyDerivable(inner)
+    }
+}
+
+impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKey for SymmetricKeyDerivable<'a, T> {
+    type Value = SymmetricKeyValue;
+
+    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
+        self.0.to_store_key_raw(hasher)
+    }
+
+    fn to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
+        T::to_store_value_raw(value)
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
+        T::from_store_value_raw(value)
+    }
+}
+
+impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable for SymmetricKeyDerivable<'a, T> {
     fn derive(&self) -> Result<SymmetricKeyValue, Error> {
-        // Generate a cryptographically secure random secret (32 bytes -> 44 base64 chars)
         let mut random_bytes = vec![0u8; 16];
         rand_bytes(&mut random_bytes)?;
         let random_secret = STANDARD.encode(&random_bytes);
 
         Ok(SymmetricKeyValue {
             random_secret,
-            key_derivation: self.key_derivation().clone(),
-            iterations: self.iterations(),
+            key_derivation: self.0.key_derivation().clone(),
+            iterations: self.0.iterations(),
         })
     }
 }
@@ -279,8 +305,10 @@ where
     C: IsCryptoStoreKeyDerivable,
     C::Value: Decryptable,
 {
-    // Step 1: Get or derive the symmetric key value (random_secret, derivation, iterations)
-    let symmetric_key_value = crypto_nix.get_or_derive(key)?;
+    // Step 1: Wrap the key in a SymmetricKeyDerivable and get or derive the
+    // symmetric key value (random_secret, derivation, iterations).
+    let derivable_key = SymmetricKeyDerivable::new(key);
+    let symmetric_key_value = crypto_nix.get_or_derive(&derivable_key)?;
 
     // Step 2: Get or derive the credential value
     let credential_value = crypto_nix.get_or_derive(credential)?;
