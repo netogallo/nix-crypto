@@ -25,13 +25,9 @@
 //! directly so callers do not need to reconstruct it manually.
 
 use nix_crypto_core::args::{SledModeConfig};
-use nix_crypto_core::error::Error;
 use nix_crypto_core::foundations::CryptoNix;
 use nix_crypto_core::logger::{Logger, LogLevel};
 use nix_crypto_core::openssl::ffi::IsOpensslPrivateKeyIdentity;
-use nix_crypto_core::openssl::pkey;
-use nix_crypto_core::openssl::pkey_store_helpers;
-use nix_crypto_core::store::{IsCryptoStoreKey, StoreHasher};
 
 /// The supported identity types for the `export secret` subcommand.
 pub enum IdentityType {
@@ -57,22 +53,6 @@ pub struct ExportArgs {
 struct OpensslPkeyIdentity {
     pkey_type: String,
     pkey_id: String,
-}
-
-impl IsCryptoStoreKey for OpensslPkeyIdentity {
-    type Value = pkey::Key;
-
-    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
-        pkey_store_helpers::to_store_key_raw(&self.pkey_type, &self.pkey_id, hasher)
-    }
-
-    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
-        pkey_store_helpers::to_store_value_raw(value)
-    }
-
-    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
-        pkey_store_helpers::from_store_value_raw(bytes)
-    }
 }
 
 impl IsOpensslPrivateKeyIdentity for OpensslPkeyIdentity {

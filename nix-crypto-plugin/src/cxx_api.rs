@@ -4,10 +4,7 @@ use std::boxed::{Box};
 // Imports from sister crates
 use nix_crypto_core::error::{Error};
 use nix_crypto_core::foundations::{CryptoNix};
-use nix_crypto_core::store::{IsCryptoStoreKey, StoreHasher};
 use nix_crypto_core::openssl::ffi;
-use nix_crypto_core::openssl::pkey;
-use nix_crypto_core::openssl::pkey_store_helpers;
 
 // Imports from this crate
 use crate::cxx_bridge::ffi::*;
@@ -142,22 +139,6 @@ pub struct CxxOpensslX509Certificate(nix_crypto_core::openssl::x509::X509Certifi
 impl CxxOpensslX509Certificate {
     pub fn public_pem(&self) -> Result<String, Error> {
         self.0.public_pem()
-    }
-}
-
-impl IsCryptoStoreKey for OpensslPrivateKeyIdentity {
-    type Value = pkey::Key;
-
-    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
-        pkey_store_helpers::to_store_key_raw(&self.key_type, &self.key_id, hasher)
-    }
-
-    fn to_store_value_raw(value: &pkey::Key) -> Result<Vec<u8>, Error> {
-        pkey_store_helpers::to_store_value_raw(value)
-    }
-
-    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<pkey::Key, Error> {
-        pkey_store_helpers::from_store_value_raw(bytes)
     }
 }
 

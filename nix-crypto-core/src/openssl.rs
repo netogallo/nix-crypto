@@ -8,7 +8,6 @@ use crate::error::{Error};
 use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
 
 pub mod pkey;
-pub mod pkey_store_helpers;
 pub mod decryptable;
 
 /// This module defines traits which describe the fields expected from
@@ -197,11 +196,11 @@ impl CryptoNix {
     /// given 'OpensslPrivateKeyIdentity'. If there is no key
     /// associated with that identity, a fresh key will be
     /// generated and saved to the store.
-    pub fn openssl_private_key<T : ffi::IsOpensslPrivateKeyIdentity>(
+    pub fn openssl_private_key<T : pkey::IsOpensslPrivateKeyIdentity>(
         &self,
         key_identity: &T
-    ) -> Result<T::Value, Error> {
-        self.get_or_derive(key_identity)
+    ) -> Result<pkey::Key, Error> {
+        self.get_or_derive(&pkey::OpensslPrivateKeyIdentityWrapper(key_identity))
     }
 
     /// Construct an X509 certificate. This function accepts a 'X50BuildParams'

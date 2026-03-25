@@ -18,6 +18,24 @@ pub trait IsCryptoStoreKeyDerivable : IsCryptoStoreKey {
     fn derive(&self) -> Result<<Self as IsCryptoStoreKey>::Value, Error>;
 }
 
+pub struct AsDerivable<'a, T>(&'a T);
+
+impl<'a, T : IsCryptoStoreKey> IsCryptoStoreKey for AsDerivable<'a, T> {
+    type Value = <T as IsCryptoStoreKey>::Value;
+
+    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
+        self.0.to_store_key_raw(hasher)
+    }
+
+    fn to_store_value_raw(value: &Self::Value) -> Result<Vec<u8>, Error> {
+        <T as IsCryptoStoreKey>::to_store_value_raw(value)
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<Self::Value, Error> {
+        <T as IsCryptoStoreKey>::from_store_value_raw(value)
+    }
+}
+
 impl CryptoNix {
 
     fn to_store_key_raw<Key: IsCryptoStoreKey>(&self, key: &Key) -> Vec<u8> {

@@ -4,7 +4,7 @@ use openssl::rsa;
 // Imports from this crate
 use crate::error::{Error};
 use crate::foundations::{IsCryptoStoreKeyDerivable};
-use crate::store::{IsCryptoStoreKey};
+use crate::store::{IsCryptoStoreKey, StoreHasher};
 
 #[repr(u8)]
 pub enum Type {
@@ -103,15 +103,47 @@ impl Key {
 /// assymetric cryptography). They idea is that they contain
 /// all the context needed to both uniquely reference a key
 /// and generate the key if no reference currently exits.
-pub trait IsOpensslPrivateKeyIdentity : IsCryptoStoreKey<Value = Key> {
+pub trait IsOpensslPrivateKeyIdentity {
     fn key_type(&self) -> &String;
     fn key_id(&self) -> &String;
 }
 
-impl<T : IsOpensslPrivateKeyIdentity> IsCryptoStoreKeyDerivable for T {
+/// This struct serves as a wrapper to allow instances of the
+/// `IsCrytpoStoreKey` and `IsCryptoStoreKeyDerivable` to be
+/// implemented for any instance of `IsOpensslPrivatekeyIdentity`
+/// without using blanket implementations.
+pub struct OpensslPrivateKeyIdentityWrapper<'a, T>(pub &'a T);
+
+impl<'a,T : IsOpensslPrivateKeyIdentity> IsCryptoStoreKey for OpensslPrivateKeyIdentityWrapper<'a, T> {
+    type Value = Key;
+
+    /// Derive a key for the store using the wrapped `IsOpensslPrivateKeyIdentity` instance.
+    /// The key is derived by hashing all of the fields together.
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        let identity = self.0;
+        hasher.update(identity.key_type().as_bytes());
+        hasher.update(identity.key_id().as_bytes());
+        Vec::from(hasher.finish())
+    }
+
+    /// Make a byte representation of the Openssl private key by converting
+    /// it to pem format and then encoding the resulting string into a
+    /// byte array.
+    fn to_store_value_raw(value: &Self::Value) -> Result<Vec<u8>, Error> {
+        Key::key_to_pem(value)
+    }
+
+    /// Recover the openssl private key by parsing the pem string which
+    /// contains the key.
+    fn from_store_value_raw(bytes: &Vec<u8>) -> Result<Self::Value, Error> {
+        Key::key_from_pem(&bytes[..])
+    }
+}
+
+impl<'a, T : IsOpensslPrivateKeyIdentity> IsCryptoStoreKeyDerivable for OpensslPrivateKeyIdentityWrapper<'a, T> {
 
     fn derive(&self) -> Result<Key, Error> {
-        let key_type = Type::try_from(self.key_type())?;
+        let key_type = Type::try_from(self.0.key_type())?;
         Key::new(key_type)
     }
 }
