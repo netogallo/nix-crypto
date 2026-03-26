@@ -28,6 +28,36 @@ impl Decryptable for pkey::Key {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Enum that lists all the key derivation schemes supported
+/// by Nix Crypto for exporting decryptable credentials.
+pub enum KeyDerivation {
+    PBKDF2 = 0
+}
+
+impl KeyDerivation {
+
+    pub fn from_string(value: &String) -> Result<KeyDerivation, Error> {
+        match value.to_lowercase().as_str() {
+            "pbkdf2" => Ok(KeyDerivation::PBKDF2),
+            _ => Error::fail_with(
+                format!("The given string '{}' is not a valid key derivation method.", value)
+            )
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Result<KeyDerivation, Error> {
+
+        if value == (KeyDerivation::PBKDF2 as u8) {
+            Ok(KeyDerivation::PBKDF2)
+        }
+        else {
+            Error::fail_with(format!("Cannot convert '{}' into a KeyDerivation", value))
+        }
+    }
+}
+
 // ============================================================================
 // SymmetricKeyValue
 // ============================================================================
@@ -37,14 +67,14 @@ impl Decryptable for pkey::Key {
 /// count used for PBKDF2.
 pub struct SymmetricKeyValue {
     pub random_secret: String,
-    pub key_derivation: String,
+    pub key_derivation: KeyDerivation,
     pub iterations: u32,
 }
 
 impl SymmetricKeyValue {
     /// Serialize to bytes as `<key_derivation>:<iterations>:<random_secret>`.
     fn to_bytes(&self) -> Vec<u8> {
-        format!("{}:{}:{}", self.key_derivation, self.iterations, self.random_secret)
+        format!("{}:{}:{}", (self.key_derivation as u8).clone(), self.iterations, self.random_secret)
             .into_bytes()
     }
 
@@ -55,10 +85,14 @@ impl SymmetricKeyValue {
         // Split into at most 3 parts so the random_secret can itself contain ':'
         let mut parts = s.splitn(3, ':');
 
-        let key_derivation = parts
+        let key_derivation_u8 = parts
             .next()
             .ok_or_else(|| Error::from_message("Missing key_derivation in SymmetricKeyValue".to_string()))?
-            .to_string();
+            .to_string()
+            .parse::<u8>()
+            .map_err(|_| Error::from_message("Invalid key derivaiton for value.".to_string()))?;
+
+        let key_derivation = KeyDerivation::from_u8(key_derivation_u8)?;
 
         let iterations_str = parts
             .next()
@@ -74,6 +108,26 @@ impl SymmetricKeyValue {
             .to_string();
 
         Ok(SymmetricKeyValue { random_secret, key_derivation, iterations })
+    }
+
+
+    /// Derive a 128-bit AES key from a passphrase using the specified
+    /// key derivation method.
+    fn derive_aes_key(&self, salt: &[u8]) -> Result<Vec<u8>, Error> {
+
+        match self.key_derivation {
+            KeyDerivation::PBKDF2 => {
+                let mut key = vec![0u8; 32];
+                pbkdf2_hmac(
+                    self.random_secret.as_bytes(),
+                    salt,
+                    self.iterations as usize,
+                    MessageDigest::sha256(),
+                    &mut key,
+                )?;
+                Ok(key)
+            }
+        }
     }
 }
 
@@ -110,11 +164,11 @@ impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKey for SymmetricKeyDeri
     }
 
     fn to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
-        T::to_store_value_raw(value)
+        Ok(value.to_bytes())
     }
 
     fn from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
-        T::from_store_value_raw(value)
+        SymmetricKeyValue::from_bytes(value)
     }
 }
 
@@ -126,21 +180,10 @@ impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable for Symmetr
 
         Ok(SymmetricKeyValue {
             random_secret,
-            key_derivation: self.0.key_derivation().clone(),
+            key_derivation: KeyDerivation::from_string(&self.0.key_derivation())?,
             iterations: self.0.iterations(),
         })
     }
-}
-
-/// Serialization helpers for `SymmetricKeyValue`. These are free functions
-/// rather than a blanket impl because Rust does not allow blanket impls of
-/// `IsCryptoStoreKey` on trait objects.
-pub fn symmetric_key_to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
-    Ok(value.to_bytes())
-}
-
-pub fn symmetric_key_from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
-    SymmetricKeyValue::from_bytes(value)
 }
 
 // ============================================================================
@@ -238,33 +281,19 @@ impl IsCryptoStoreKeyDerivable for EncryptionParamsKey {
 const PEM_HEADER: &str = "-----BEGIN ENCRYPTED DATA-----";
 const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
 
-/// Derive a 256-bit AES key from a passphrase using PBKDF2-SHA256.
-fn derive_aes_key(passphrase: &str, salt: &[u8], iterations: u32) -> Result<Vec<u8>, Error> {
-    let mut key = vec![0u8; 32];
-    pbkdf2_hmac(
-        passphrase.as_bytes(),
-        salt,
-        iterations as usize,
-        MessageDigest::sha256(),
-        &mut key,
-    )?;
-    Ok(key)
-}
-
-/// Encrypt `plaintext` with AES-256-CBC and return a PEM-encoded string.
+/// Encrypt `plaintext` with AES-128-CBC and return a PEM-encoded string.
 ///
 /// The payload layout matches the OpenSSL `enc` format:
 ///   `Salted__` (8 bytes) | salt (8 bytes) | ciphertext
 /// The whole payload is Base64-encoded and wrapped in a PEM envelope.
 fn encrypt_to_pem(
-    plaintext: &[u8],
-    passphrase: &str,
+    key: &SymmetricKeyValue,
     salt: &[u8],
     iv: &[u8],
-    iterations: u32,
+    plaintext: &Vec<u8>
 ) -> Result<String, Error> {
-    let key = derive_aes_key(passphrase, salt, iterations)?;
-    let cipher = Cipher::aes_256_cbc();
+    let key = key.derive_aes_key(salt)?;
+    let cipher = Cipher::aes_128_cbc();
     let ciphertext = encrypt(cipher, &key, Some(iv), plaintext)?;
 
     let mut payload = Vec::new();
@@ -290,7 +319,7 @@ fn encrypt_to_pem(
 // ============================================================================
 
 /// Export a credential encrypted with a symmetric key, returning a
-/// PEM-formatted string containing the AES-256-CBC encrypted credential.
+/// PEM-formatted string containing the AES-128-CBC encrypted credential.
 ///
 /// Calling this function multiple times with the same `key`, `credential`,
 /// and store will always produce identical output, because the salt and IV
@@ -317,6 +346,10 @@ where
     // the symmetric key and the credential, then get or derive the params.
     let raw_key_key = crypto_nix.to_store_key_raw_pub(key);
     let raw_credential_key = crypto_nix.to_store_key_raw_pub(credential);
+
+    // Encription parameters are unique per key/credential combination. This
+    // is important as the security of AES becomes weaker if the IV is
+    // reused on different plaintext inputs.
     let encryption_params_key = EncryptionParamsKey::new(raw_key_key, raw_credential_key);
     let encryption_params = crypto_nix.get_or_derive(&encryption_params_key)?;
 
@@ -325,10 +358,9 @@ where
 
     // Step 5: Encrypt and return as PEM
     encrypt_to_pem(
-        &plaintext,
-        &symmetric_key_value.random_secret,
+        &symmetric_key_value,
         &encryption_params.salt,
         &encryption_params.iv,
-        symmetric_key_value.iterations,
+        &plaintext
     )
 }
