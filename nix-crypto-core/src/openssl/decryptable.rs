@@ -145,34 +145,36 @@ pub trait IsOpensslSymmetricKeyIdentity : IsCryptoStoreKey<Value = SymmetricKeyV
     fn iterations(&self) -> u32;
 }
 
-/// A newtype wrapper around a reference to any `IsOpensslSymmetricKeyIdentity`
-/// implementor. This exists solely to provide a single, non-conflicting
-/// `IsCryptoStoreKeyDerivable` impl for symmetric keys.
-struct SymmetricKeyDerivable<'a, T: IsOpensslSymmetricKeyIdentity>(&'a T);
+/// A newtype wrapper around a reference to an arbitrary `IsOpensslSymmetricKeyIdentity`
+/// instance. The `IsCrytpoStoreKeyDerivable` trait for symmetric key identites
+/// is implemented through this type.
+struct SymmetricKeyIdentity<'a, T: IsOpensslSymmetricKeyIdentity>(pub &'a T);
 
-impl<'a, T: IsOpensslSymmetricKeyIdentity> SymmetricKeyDerivable<'a, T> {
-    pub fn new(inner: &'a T) -> Self {
-        SymmetricKeyDerivable(inner)
-    }
-}
-
-impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKey for SymmetricKeyDerivable<'a, T> {
+impl<'a, T : IsOpensslSymmetricKeyIdentity> IsCryptoStoreKey
+for SymmetricKeyIdentity<'a, T> {
     type Value = SymmetricKeyValue;
 
-    fn to_store_key_raw(&self, hasher: StoreHasher) -> Vec<u8> {
-        self.0.to_store_key_raw(hasher)
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        let identity = self.0;
+        let iterations = identity.iterations();
+        hasher.update(identity.key_id().as_bytes());
+        hasher.update(identity.key_derivation().as_bytes());
+        hasher.update(&iterations.to_be_bytes());
+        Vec::from(hasher.finish())
     }
 
     fn to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
         Ok(value.to_bytes())
     }
 
+
     fn from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
         SymmetricKeyValue::from_bytes(value)
     }
 }
 
-impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable for SymmetricKeyDerivable<'a, T> {
+impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable
+for SymmetricKeyIdentity<'a, T> {
     fn derive(&self) -> Result<SymmetricKeyValue, Error> {
         let mut random_bytes = vec![0u8; 16];
         rand_bytes(&mut random_bytes)?;
@@ -334,9 +336,9 @@ where
     C: IsCryptoStoreKeyDerivable,
     C::Value: Decryptable,
 {
-    // Step 1: Wrap the key in a SymmetricKeyDerivable and get or derive the
+    // Step 1: Wrap the key in a SymmetricKeyIdentity and get or derive the
     // symmetric key value (random_secret, derivation, iterations).
-    let derivable_key = SymmetricKeyDerivable::new(key);
+    let derivable_key = SymmetricKeyIdentity(key);
     let symmetric_key_value = crypto_nix.get_or_derive(&derivable_key)?;
 
     // Step 2: Get or derive the credential value
