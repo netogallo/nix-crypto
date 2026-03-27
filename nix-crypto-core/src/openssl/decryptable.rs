@@ -139,7 +139,7 @@ impl SymmetricKeyValue {
 /// derivation scheme, and PBKDF2 iteration count. The underlying
 /// `SymmetricKeyValue` (including the random secret) is derived and stored
 /// automatically.
-pub trait IsOpensslSymmetricKeyIdentity : IsCryptoStoreKey<Value = SymmetricKeyValue> {
+pub trait IsOpensslSymmetricKeyIdentity {
     fn key_id(&self) -> &String;
     fn key_derivation(&self) -> &String;
     fn iterations(&self) -> u32;
@@ -240,24 +240,26 @@ impl EncryptionParams {
 /// The store key for `EncryptionParams`. It is derived by hashing the raw
 /// store keys of both the symmetric key identity and the credential identity,
 /// making it unique per `(key, credential)` pair.
-pub struct EncryptionParamsKey {
-    raw_key_key: Vec<u8>,
-    raw_credential_key: Vec<u8>,
+struct EncryptionParamsKey<'a, TKey, TCred> {
+    symmetric_key_identity: &'a TKey,
+    credential_identity: &'a TCred,
 }
 
-impl EncryptionParamsKey {
-    pub fn new(raw_key_key: Vec<u8>, raw_credential_key: Vec<u8>) -> Self {
-        EncryptionParamsKey { raw_key_key, raw_credential_key }
+impl<'a, TKey, TCred> EncryptionParamsKey<'a, TKey, TCred> {
+    pub fn new(symmetric_key_identity: &'a TKey, credential_identity: &'a TCred) -> Self {
+        EncryptionParamsKey { symmetric_key_identity, credential_identity }
     }
 }
 
-impl IsCryptoStoreKey for EncryptionParamsKey {
+impl<'a, TKey, TCred> IsCryptoStoreKey
+for EncryptionParamsKey<'a, TKey, TCred>
+where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
     type Value = EncryptionParams;
 
     fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
         hasher.update(b"encryption_params");
-        hasher.update(&self.raw_key_key);
-        hasher.update(&self.raw_credential_key);
+        hasher.update_with_identity(self.symmetric_key_identity);
+        hasher.update_with_identity(self.credential_identity);
         Vec::from(hasher.finish())
     }
 
@@ -270,7 +272,8 @@ impl IsCryptoStoreKey for EncryptionParamsKey {
     }
 }
 
-impl IsCryptoStoreKeyDerivable for EncryptionParamsKey {
+impl<'a, TKey, TCred> IsCryptoStoreKeyDerivable for EncryptionParamsKey<'a, TKey, TCred>
+where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
     fn derive(&self) -> Result<EncryptionParams, Error> {
         EncryptionParams::generate()
     }
@@ -338,21 +341,21 @@ where
 {
     // Step 1: Wrap the key in a SymmetricKeyIdentity and get or derive the
     // symmetric key value (random_secret, derivation, iterations).
-    let derivable_key = SymmetricKeyIdentity(key);
-    let symmetric_key_value = crypto_nix.get_or_derive(&derivable_key)?;
+    let symmetric_identity = SymmetricKeyIdentity(key);
+    let symmetric_key_value = crypto_nix.get_or_derive(&symmetric_identity)?;
 
     // Step 2: Get or derive the credential value
     let credential_value = crypto_nix.get_or_derive(credential)?;
 
     // Step 3: Build the EncryptionParamsKey from the raw store keys of both
     // the symmetric key and the credential, then get or derive the params.
-    let raw_key_key = crypto_nix.to_store_key_raw_pub(key);
-    let raw_credential_key = crypto_nix.to_store_key_raw_pub(credential);
+    // let raw_key_key = crypto_nix.to_store_key_raw_pub(key);
+    // let raw_credential_key = crypto_nix.to_store_key_raw_pub(credential);
 
     // Encription parameters are unique per key/credential combination. This
     // is important as the security of AES becomes weaker if the IV is
     // reused on different plaintext inputs.
-    let encryption_params_key = EncryptionParamsKey::new(raw_key_key, raw_credential_key);
+    let encryption_params_key = EncryptionParamsKey::new(&symmetric_identity, credential);
     let encryption_params = crypto_nix.get_or_derive(&encryption_params_key)?;
 
     // Step 4: Export the credential to plaintext bytes

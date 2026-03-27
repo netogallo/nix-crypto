@@ -2,21 +2,28 @@ use openssl::sha::Sha256;
 
 use crate::error::*;
 
-pub struct StoreHasher(Sha256);
+pub struct StoreHasher {
+    salt: Vec<u8>,
+    hasher: Sha256
+}
 
 impl StoreHasher {
-    pub fn init(salt: &[u8]) -> Self {
-        let mut sha256 = Sha256::new();
-        sha256.update(salt);
-        StoreHasher(sha256)
+    pub fn init(salt: Vec<u8>) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(&salt.as_slice());
+        StoreHasher { salt, hasher }
     }
 
     pub fn update(&mut self, buf: &[u8]) {
-        self.0.update(buf);
+        self.hasher.update(buf);
+    }
+
+    pub fn update_with_identity<T : IsCryptoStoreKey>(&mut self, identity: &T) -> () {
+        self.update(&identity.to_store_key_raw(StoreHasher::init(self.salt.clone())).as_slice());
     }
 
     pub fn finish(self) -> [u8; 32] {
-        self.0.finish()
+        self.hasher.finish()
     }
 }
 

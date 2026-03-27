@@ -38,16 +38,11 @@ impl<'a, T : IsCryptoStoreKey> IsCryptoStoreKey for AsDerivable<'a, T> {
 
 impl CryptoNix {
 
+    /// Get a byte Vector which uniquely represents the given
+    /// `IsCryptoStoreKey` instance.
     fn to_store_key_raw<Key: IsCryptoStoreKey>(&self, key: &Key) -> Vec<u8> {
-        let hasher = StoreHasher::init(&self.salt());
+        let hasher = StoreHasher::init(self.salt());
         key.to_store_key_raw(hasher)
-    }
-
-    /// Public wrapper around `to_store_key_raw`. Needed by external modules
-    /// such as `decryptable` that must compute raw store keys in order to
-    /// build composite keys (e.g. `EncryptionParamsKey`).
-    pub fn to_store_key_raw_pub<Key: IsCryptoStoreKey>(&self, key: &Key) -> Vec<u8> {
-        self.to_store_key_raw(key)
     }
 
     /// Try getting a value from the 'CryptoStore' which is associated
