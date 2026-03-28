@@ -363,8 +363,8 @@ static void primop_openssl_export_decryptable_pkey(EvalState& state, const PosId
 }
 
 constexpr const int OPENSSL_PRIMOPS_COUNT = 3;
-constexpr const std::string K_X509_PEM = "x509-pem";
-constexpr const std::string K_EXPORT_DECRYPTABLE_PKEY = "export-decryptable-pkey";
+constexpr const char* K_X509_PEM = "x509-pem";
+constexpr const char* K_EXPORT_DECRYPTABLE_PKEY = "export-decryptable-pkey";
 
 void primop_openssl(EvalState& state, const PosIdx, Value**, Value& result) {
 
