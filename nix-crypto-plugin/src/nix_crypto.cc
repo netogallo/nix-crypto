@@ -85,6 +85,15 @@ std::string CryptoNixPrimops::opensslX509Pem(X509BuildParams&& buildParams) {
     );
 }
 
+std::string CryptoNixPrimops::opensslExportDecryptableOpensslPkey(
+    OpensslSymmetricKeyIdentity&& symmetric_key,
+    OpensslPrivateKeyIdentity&& credential
+) {
+    return std::string(
+        cryptoNix()->cxx_export_decryptable_openssl_pkey(symmetric_key, credential).c_str()
+    );
+}
+
 CryptoNixPrimops::~CryptoNixPrimops() {}
 
 void init_primops() {

@@ -36,6 +36,50 @@ static OpensslPrivateKeyIdentity openssl_get_private_key_identity(
     return { key_type.data(), key_id.data() };
 }
 
+static OpensslSymmetricKeyIdentity openssl_get_symmetric_key_identity(
+    EvalState& state,
+    const PosIdx pos,
+    Value& key_args
+) {
+    state.forceAttrs(key_args, pos, "while evaluating the openssl symmetric key args passed to builtins.openssl.export-decryptable-pkey");
+
+    auto key_id = state.forceStringNoCtx(
+        *state.getAttr(
+            state.symbols.create("key-id"),
+            key_args.attrs(),
+            "in the openssl symmetric key parameters"
+        )->value,
+        pos,
+        "while reading the 'key-id' parameter"
+    );
+
+    auto key_derivation = state.forceStringNoCtx(
+        *state.getAttr(
+            state.symbols.create("key-derivation"),
+            key_args.attrs(),
+            "in the openssl symmetric key parameters"
+        )->value,
+        pos,
+        "while reading the 'key-derivation' parameter"
+    );
+
+    auto iterations = state.forceInt(
+        *state.getAttr(
+            state.symbols.create("iterations"),
+            key_args.attrs(),
+            "in the openssl symmetric key parameters"
+        )->value,
+        pos,
+        "while reading the 'iterations' parameter"
+    ).value;
+
+    return {
+        .key_id = rust::String(key_id.data()),
+        .key_derivation = rust::String(key_derivation.data()),
+        .iterations = static_cast<uint32_t>(iterations),
+    };
+}
+
 /// @breif A nix primop that allows generating x509 certificates.
 ///
 /// This function is a wrapepr around openssl to generate x509
@@ -304,8 +348,23 @@ static void primop_openssl_x509_pem(EvalState& state, const PosIdx pos, Value** 
     }
 }
 
-constexpr const int OPENSSL_PRIMOPS_COUNT = 2;
+static void primop_openssl_export_decryptable_pkey(EvalState& state, const PosIdx pos, Value** args, Value& result) {
+    try {
+        auto pem = primops->opensslExportDecryptableOpensslPkey(
+            openssl_get_symmetric_key_identity(state, pos, *args[0]),
+            openssl_get_private_key_identity(state, pos, *args[1])
+        );
+        result.mkString(pem);
+    } catch(rust::Error& e) {
+        state.error<EvalError>(e.what())
+            .atPos(pos)
+            .debugThrow();
+    }
+}
+
+constexpr const int OPENSSL_PRIMOPS_COUNT = 3;
 constexpr const std::string K_X509_PEM = "x509-pem";
+constexpr const std::string K_EXPORT_DECRYPTABLE_PKEY = "export-decryptable-pkey";
 
 void primop_openssl(EvalState& state, const PosIdx, Value**, Value& result) {
 
@@ -328,6 +387,16 @@ void primop_openssl(EvalState& state, const PosIdx, Value**, Value& result) {
         .arity = 1,
         .doc = {},
         .fun = primop_openssl_x509_pem,
+        .experimentalFeature = {},
+    });
+
+    auto opensslExportDecryptablePkey = state.symbols.create(K_EXPORT_DECRYPTABLE_PKEY);
+    attrs.alloc(opensslExportDecryptablePkey).mkPrimOp(new PrimOp {
+        .name = K_EXPORT_DECRYPTABLE_PKEY,
+        .args = {},
+        .arity = 2,
+        .doc = {},
+        .fun = primop_openssl_export_decryptable_pkey,
         .experimentalFeature = {},
     });
 
