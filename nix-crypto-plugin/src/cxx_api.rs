@@ -5,6 +5,8 @@ use std::boxed::{Box};
 use nix_crypto_core::error::{Error};
 use nix_crypto_core::foundations::{CryptoNix};
 use nix_crypto_core::openssl::ffi;
+use nix_crypto_core::openssl::pkey::OpensslPrivateKeyIdentityWrapper;
+use nix_crypto_core::openssl::decryptable::{export_decryptable, IsOpensslSymmetricKeyIdentity};
 
 // Imports from this crate
 use crate::cxx_bridge::ffi::*;
@@ -46,6 +48,21 @@ impl ffi::IsOpensslPrivateKeyIdentity for OpensslPrivateKeyIdentity {
 
     fn key_id(&self) -> &String {
         &self.key_id
+    }
+}
+
+impl IsOpensslSymmetricKeyIdentity for OpensslSymmetricKeyIdentity {
+
+    fn key_id(&self) -> &String {
+        &self.key_id
+    }
+
+    fn key_derivation(&self) -> &String {
+        &self.key_derivation
+    }
+
+    fn iterations(&self) -> u32 {
+        self.iterations
     }
 }
 
@@ -153,5 +170,22 @@ impl CxxNixCrypto {
     pub fn cxx_openssl_x509_certificate(&self, args: X509BuildParams) -> Result<Box<CxxOpensslX509Certificate>, Error> {
         let result = self.0.openssl_x509_certificate(&args)?;
         Ok(Box::new(CxxOpensslX509Certificate(result)))
+    }
+
+    /// Export an openssl private key credential encrypted with the given symmetric key,
+    /// returning a PEM-formatted string containing the AES-128-CBC encrypted private key.
+    ///
+    /// This is a monomorphic wrapper around `export_decryptable` for the
+    /// `OpensslPrivateKeyIdentity` credential type, making it callable from C++.
+    pub fn cxx_export_decryptable_openssl_pkey(
+        &self,
+        symmetric_key: OpensslSymmetricKeyIdentity,
+        credential: OpensslPrivateKeyIdentity,
+    ) -> Result<String, Error> {
+        export_decryptable(
+            &self.0,
+            &symmetric_key,
+            &OpensslPrivateKeyIdentityWrapper(&credential),
+        )
     }
 }
