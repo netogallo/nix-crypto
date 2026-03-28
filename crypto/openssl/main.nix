@@ -1,7 +1,7 @@
 /**
   OpenSSL cryptographic operations for nix-crypto.
 */
-{ pkgs, prelude, private-key-spec-type, x509-params-type, ... }@module:
+{ pkgs, prelude, private-key-spec-type, x509-params-type, export-decryptable-pkey-params-type, ... }@module:
 let
   inherit (pkgs) lib;
   inherit (lib) types;
@@ -51,6 +51,19 @@ let
   ;
 
   /**
+    Export a private key credential encrypted with the given symmetric key.
+    Returns a PEM-formatted string containing the AES-128-CBC encrypted
+    private key.
+
+    The same inputs (symmetric-key-params, key-ref, store) will always
+    produce identical output, as the salt and IV are persisted in the store
+    on the first call and reused thereafter.
+  */
+  export-decryptable-pkey = { key-ref, symmetric-key-params }:
+    openssl.export-decryptable-pkey symmetric-key-params key-ref
+  ;
+
+  /**
     Retrieve or generate an OpenSSL private key.
     Accepts a `key-spec` with:
     - `attrs`: an attribute set of key-value pairs used to construct the key
@@ -63,6 +76,8 @@ let
       sled store without reconstructing the identity manually.
     - `public-key-pem`: the public key in PEM format, computed by the nix plugin.
     - `x509`: a function to build X.509 certificates signed by this key.
+    - `export-decryptable-pkey`: a function to export this private key encrypted
+      with a symmetric key.
   */
   private-key-impl = key-spec:
   let
@@ -78,6 +93,11 @@ let
         type-checker.function
         [ { name = "x509-params"; type = x509-params-type; } ]
         (x509-params: x509 { inherit key-ref x509-params; })
+      ;
+      export-decryptable-pkey =
+        type-checker.function
+        [ { name = "symmetric-key-params"; type = export-decryptable-pkey-params-type; } ]
+        (symmetric-key-params: export-decryptable-pkey { inherit key-ref symmetric-key-params; })
       ;
     }
   ;
