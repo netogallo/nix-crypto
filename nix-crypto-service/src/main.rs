@@ -42,7 +42,7 @@ use serde::Deserialize;
 mod common;
 mod export;
 
-use crate::common::{NixCryptoArgs, Error, StoreArgs, LogArgs};
+use crate::common::{Error, NixCryptoArgs};
 
 const USAGE: &str = "
 Usage:
@@ -79,7 +79,11 @@ struct Args {
 impl Args {
 
     pub fn to_nix_crypto_args(&self) -> Result<NixCryptoArgs, Error> {
-        panic!("my god")
+        NixCryptoArgs::from_flags(
+            self.flag_sled_store.clone(),
+            self.flag_log_file.clone(),
+            self.flag_log_level.clone(),
+        )
     }
 
     pub fn main(&self) -> Result<(), Error> {
@@ -88,20 +92,20 @@ impl Args {
             return Ok(());
         }
 
-        if args.cmd_export && args.cmd_secret {
+        if self.cmd_export && self.cmd_secret {
             let export_args = export::resolve_args(
                 self.to_nix_crypto_args()?,
-                args.flag_identity_type,
-                args.flag_openssl_pkey_type,
-                args.flag_openssl_pkey_id,
-                args.flag_output_file,
+                self.flag_identity_type.clone(),
+                self.flag_openssl_pkey_type.clone(),
+                self.flag_openssl_pkey_id.clone(),
+                self.flag_output_file.clone(),
             )?;
 
             export::run_secret(export_args)?;
-            Ok(());
+            return Ok(());
         }
 
-        return Err(Error::unknonw_action());
+        Err(Error::unknown_action())
     }
 }
 
@@ -113,7 +117,7 @@ fn main() {
 
     match args.main() {
         Ok(()) => return,
-        e => {
+        Err(e) => {
             eprintln!("{}\n\nError:\n\n{}", USAGE, e.as_string());
             std::process::exit(1);
         }
