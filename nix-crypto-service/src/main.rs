@@ -39,7 +39,10 @@
 use docopt::Docopt;
 use serde::Deserialize;
 
+mod common;
 mod export;
+
+use crate::common::{NixCryptoArgs, Error, StoreArgs, LogArgs};
 
 const USAGE: &str = "
 Usage:
@@ -73,40 +76,46 @@ struct Args {
     flag_log_level: Option<String>,
 }
 
+impl Args {
+
+    pub fn to_nix_crypto_args(&self) -> Result<NixCryptoArgs, Error> {
+        panic!("my god")
+    }
+
+    pub fn main(&self) -> Result<(), Error> {
+        if self.flag_version {
+            println!("nix-crypto-service {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+
+        if args.cmd_export && args.cmd_secret {
+            let export_args = export::resolve_args(
+                self.to_nix_crypto_args()?,
+                args.flag_identity_type,
+                args.flag_openssl_pkey_type,
+                args.flag_openssl_pkey_id,
+                args.flag_output_file,
+            )?;
+
+            export::run_secret(export_args)?;
+            Ok(());
+        }
+
+        return Err(Error::unknonw_action());
+    }
+}
+
 fn main() {
     let args: Args = Docopt::new(USAGE)
         .and_then(|d| Ok(d.argv(std::env::args())))
         .and_then(|d| d.deserialize())
         .unwrap_or_else(|e| e.exit());
 
-    if args.flag_version {
-        println!("nix-crypto-service {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-
-    if args.cmd_export && args.cmd_secret {
-        let export_args = export::resolve_args(
-            args.flag_sled_store,
-            args.flag_identity_type,
-            args.flag_openssl_pkey_type,
-            args.flag_openssl_pkey_id,
-            args.flag_output_file,
-            args.flag_log_file,
-            args.flag_log_level,
-        )
-        .unwrap_or_else(|e| {
-            eprintln!("Error: {}", e);
+    match args.main() {
+        Ok(()) => return,
+        e => {
+            eprintln!("{}\n\nError:\n\n{}", USAGE, e.as_string());
             std::process::exit(1);
-        });
-
-        export::run_secret(export_args).unwrap_or_else(|e| {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        });
-
-        return;
+        }
     }
-
-    eprintln!("{}", USAGE);
-    std::process::exit(1);
 }

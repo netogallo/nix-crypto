@@ -24,10 +24,10 @@
 //! The `identity` field on the nix private key object exposes this string
 //! directly so callers do not need to reconstruct it manually.
 
-use nix_crypto_core::args::{SledModeConfig};
 use nix_crypto_core::foundations::CryptoNix;
-use nix_crypto_core::logger::{Logger, LogLevel};
 use nix_crypto_core::openssl::ffi::IsOpensslPrivateKeyIdentity;
+
+use crate::common::{NixCryptoArgs};
 
 /// The supported identity types for the `export secret` subcommand.
 pub enum IdentityType {
@@ -40,14 +40,12 @@ pub enum IdentityType {
 
 /// The resolved arguments for the `export secret` subcommand.
 pub struct ExportArgs {
-    /// Path to the sled store on the filesystem.
-    pub sled_store: String,
     /// The identity of the secret to export.
     pub identity_type: IdentityType,
     /// The file path to write the exported PEM private key to.
     pub output_file: String,
-    /// The logger to use for this invocation.
-    pub logger: Logger,
+    /// The arguments used to build the `CryptoNix` instance
+    pub nix_crypto_args: NixCryptoArgs,
 }
 
 struct OpensslPkeyIdentity {
@@ -62,31 +60,6 @@ impl IsOpensslPrivateKeyIdentity for OpensslPkeyIdentity {
 
     fn key_id(&self) -> &String {
         &self.pkey_id
-    }
-}
-
-/// Resolves the sled store path from the `--sled-store` flag or from the
-/// `NIX_CRYPTO_STORE` environment variable (`sled:<path>`).
-fn resolve_sled_store(flag_sled_store: Option<String>) -> Result<String, String> {
-    if let Some(path) = flag_sled_store {
-        return Ok(path);
-    }
-
-    match std::env::var("NIX_CRYPTO_STORE") {
-        Ok(val) => {
-            if let Some(path) = val.strip_prefix("sled:") {
-                Ok(path.to_string())
-            } else {
-                Err(format!(
-                    "NIX_CRYPTO_STORE value '{}' is not in the expected format 'sled:<store path>'",
-                    val
-                ))
-            }
-        }
-        Err(_) => Err(
-            "No store specified. Use --sled-store or set NIX_CRYPTO_STORE=sled:<store path>"
-                .to_string(),
-        ),
     }
 }
 
@@ -115,32 +88,14 @@ fn resolve_identity_type(
     }
 }
 
-/// Resolves the logger from the `--log-file` and `--log-level` flags.
-fn resolve_logger(
-    flag_log_file: Option<String>,
-    flag_log_level: Option<String>,
-) -> Result<Logger, String> {
-    let log_level = match flag_log_level.as_deref() {
-        None | Some("") => LogLevel::Info,
-        Some(level) => LogLevel::from_str(level)?,
-    };
-
-    match flag_log_file {
-        None => Ok(Logger::dummy()),
-        Some(path) => Logger::file(&path, log_level),
-    }
-}
-
 /// Resolves all CLI flags into an [`ExportArgs`] struct.
 pub fn resolve_args(
-    flag_sled_store: Option<String>,
+    nix_crypto_args: NixCryptoArgs,
     flag_identity_type: Option<String>,
     flag_openssl_pkey_type: Option<String>,
     flag_openssl_pkey_id: Option<String>,
     flag_output_file: Option<String>,
-    flag_log_file: Option<String>,
-    flag_log_level: Option<String>,
-) -> Result<ExportArgs, String> {
+) -> Result<ExportArgs, Error> {
     let sled_store = resolve_sled_store(flag_sled_store)?;
     let identity_type = resolve_identity_type(
         flag_identity_type,
@@ -152,10 +107,10 @@ pub fn resolve_args(
     let logger = resolve_logger(flag_log_file, flag_log_level)?;
 
     Ok(ExportArgs {
-        sled_store,
         identity_type,
         output_file,
         logger,
+        nix_crypto_args
     })
 }
 
@@ -165,11 +120,8 @@ pub fn resolve_args(
 /// retrieves (or generates) the private key identified by [`ExportArgs::identity_type`],
 /// converts it to PEM format, and writes it to [`ExportArgs::output_file`].
 pub fn run_secret(args: ExportArgs) -> Result<(), String> {
-    let sled_config = SledModeConfig {
-        store_path: args.sled_store.clone(),
-    };
 
-    let crypto_nix = CryptoNix::from_sled_config(&sled_config, args.logger);
+    let crypto_nix = args.nix_crypto.init();
 
     match args.identity_type {
         IdentityType::OpensslPkey { pkey_type, pkey_id } => {
