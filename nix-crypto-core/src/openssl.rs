@@ -275,4 +275,18 @@ impl CryptoNix {
     {
         decryptable::export_decryptable(self, key, credential)
     }
+
+    /// Retrieve (or derive and store) the random passphrase for the symmetric
+    /// key identified by `key`. Returns the passphrase string which is used as
+    /// input to the key derivation function.
+    ///
+    /// Calling this method multiple times with the same `key` and store will
+    /// always return the same passphrase, because the value is stored on the
+    /// first call and reused thereafter.
+    pub fn openssl_symmetric_key_passphrase<K: decryptable::IsOpensslSymmetricKeyIdentity>(
+        &self,
+        key: &K,
+    ) -> Result<String, Error> {
+        decryptable::get_symmetric_key_passphrase(self, key)
+    }
 }

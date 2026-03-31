@@ -347,11 +347,6 @@ where
     // Step 2: Get or derive the credential value
     let credential_value = crypto_nix.get_or_derive(credential)?;
 
-    // Step 3: Build the EncryptionParamsKey from the raw store keys of both
-    // the symmetric key and the credential, then get or derive the params.
-    // let raw_key_key = crypto_nix.to_store_key_raw_pub(key);
-    // let raw_credential_key = crypto_nix.to_store_key_raw_pub(credential);
-
     // Encription parameters are unique per key/credential combination. This
     // is important as the security of AES becomes weaker if the IV is
     // reused on different plaintext inputs.
@@ -368,4 +363,24 @@ where
         &encryption_params.iv,
         &plaintext
     )
+}
+
+// ============================================================================
+// get_symmetric_key_passphrase
+// ============================================================================
+
+/// Retrieve (or derive and store) the random passphrase for the symmetric key
+/// identified by `key`. Returns the `random_secret` string which is the
+/// passphrase used as input to the key derivation function.
+///
+/// Calling this function multiple times with the same `key` and store will
+/// always return the same passphrase, because the `SymmetricKeyValue` is
+/// stored on the first call and reused thereafter.
+pub fn get_symmetric_key_passphrase<K: IsOpensslSymmetricKeyIdentity>(
+    crypto_nix: &CryptoNix,
+    key: &K,
+) -> Result<String, Error> {
+    let symmetric_identity = SymmetricKeyIdentity(key);
+    let value = crypto_nix.get_or_derive(&symmetric_identity)?;
+    Ok(value.random_secret)
 }

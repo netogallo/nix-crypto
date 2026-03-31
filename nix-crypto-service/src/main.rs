@@ -17,6 +17,18 @@
 //!   --output-file <path>
 //! ```
 //!
+//! Exports a symmetric key passphrase from the sled store to a file:
+//!
+//! ```text
+//! nix-crypto-service export secret \
+//!   --sled-store <path> \
+//!   --identity-type openssl-symmetric-key \
+//!   --openssl-symmetric-key-id <id> \
+//!   --openssl-symmetric-key-derivation pbkdf2 \
+//!   --openssl-symmetric-key-iterations 600000 \
+//!   --output-file <path>
+//! ```
+//!
 //! If `--sled-store` is not provided, the store path is resolved from the
 //! `NIX_CRYPTO_STORE` environment variable, which must be set to `sled:<path>`.
 //!
@@ -47,19 +59,22 @@ use crate::common::{Error, NixCryptoArgs};
 const USAGE: &str = "
 Usage:
     nix-crypto-service --version
-    nix-crypto-service export secret [--sled-store <sled_store>] --identity-type <identity_type> [--openssl-pkey-type <openssl_pkey_type>] [--openssl-pkey-id <openssl_pkey_id>] --output-file <output_file> [--log-file <log_file>] [--log-level <log_level>]
+    nix-crypto-service export secret [--sled-store <sled_store>] --identity-type <identity_type> [--openssl-pkey-type <openssl_pkey_type>] [--openssl-pkey-id <openssl_pkey_id>] [--openssl-symmetric-key-id <openssl_symmetric_key_id>] [--openssl-symmetric-key-derivation <openssl_symmetric_key_derivation>] [--openssl-symmetric-key-iterations <openssl_symmetric_key_iterations>] --output-file <output_file> [--log-file <log_file>] [--log-level <log_level>]
     nix-crypto-service --help
 
 Options:
-    -h, --help                                      Show this help message.
-    -v, --version                                   Show the version.
-    --sled-store <sled_store>                       Path to the sled store on the filesystem.
-    --identity-type <identity_type>                 The identity type being exported.
-    --openssl-pkey-type <openssl_pkey_type>         The openssl private key type (required when --identity-type is 'openssl-pkey').
-    --openssl-pkey-id <openssl_pkey_id>             The openssl private key id (required when --identity-type is 'openssl-pkey').
-    --output-file <output_file>                     The file to write the exported secret to.
-    --log-file <log_file>                           Path to the log file. If absent, logging is disabled.
-    --log-level <log_level>                         Minimum log level: debug, info, warn, error [default: info].
+    -h, --help                                                              Show this help message.
+    -v, --version                                                           Show the version.
+    --sled-store <sled_store>                                               Path to the sled store on the filesystem.
+    --identity-type <identity_type>                                         The identity type being exported (openssl-pkey, openssl-symmetric-key).
+    --openssl-pkey-type <openssl_pkey_type>                                 The openssl private key type (required when --identity-type is 'openssl-pkey').
+    --openssl-pkey-id <openssl_pkey_id>                                     The openssl private key id (required when --identity-type is 'openssl-pkey').
+    --openssl-symmetric-key-id <openssl_symmetric_key_id>                   The symmetric key id (required when --identity-type is 'openssl-symmetric-key').
+    --openssl-symmetric-key-derivation <openssl_symmetric_key_derivation>   The key derivation scheme [default: pbkdf2].
+    --openssl-symmetric-key-iterations <openssl_symmetric_key_iterations>   The number of key derivation iterations [default: 600000].
+    --output-file <output_file>                                             The file to write the exported secret to.
+    --log-file <log_file>                                                   Path to the log file. If absent, logging is disabled.
+    --log-level <log_level>                                                 Minimum log level: debug, info, warn, error [default: info].
 ";
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +86,9 @@ struct Args {
     flag_identity_type: Option<String>,
     flag_openssl_pkey_type: Option<String>,
     flag_openssl_pkey_id: Option<String>,
+    flag_openssl_symmetric_key_id: Option<String>,
+    flag_openssl_symmetric_key_derivation: Option<String>,
+    flag_openssl_symmetric_key_iterations: Option<String>,
     flag_output_file: Option<String>,
     flag_log_file: Option<String>,
     flag_log_level: Option<String>,
@@ -98,6 +116,9 @@ impl Args {
                 self.flag_identity_type.clone(),
                 self.flag_openssl_pkey_type.clone(),
                 self.flag_openssl_pkey_id.clone(),
+                self.flag_openssl_symmetric_key_id.clone(),
+                self.flag_openssl_symmetric_key_derivation.clone(),
+                self.flag_openssl_symmetric_key_iterations.clone(),
                 self.flag_output_file.clone(),
             )?;
 
