@@ -1,11 +1,11 @@
 { pkgs, lib, ... }:
 let
-  type-checker = { file }:
+  type-checker = { }:
   {
     function = args: func:
       let
         check = { name, type }: value:
-          type.merge [ name ] [ { inherit value file; } ]
+          type.type.merge [ name ] [ { inherit value; inherit (type) file; } ]
         ; 
         check-apply = f: arg: value: f (check arg value);
       in

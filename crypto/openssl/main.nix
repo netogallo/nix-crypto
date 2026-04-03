@@ -6,9 +6,7 @@ let
   inherit (pkgs) lib;
   inherit (lib) types;
   inherit (builtins.crypto) openssl;
-  type-checker = prelude.type-checker {
-    file = "${./openssl.nix}";
-  };
+  type-checker = prelude.type-checker { };
 
   /**
     Produces a deterministic key identity string from an attribute set.
