@@ -8,7 +8,7 @@ This report documents the implementation of two related features added to the
 nix-crypto project:
 
   1. Export Decryptable: the ability to encrypt an OpenSSL private key with a
-     symmetric key and expose the encrypted result as a PEM-formatted string
+     symmetric key and expose the encrypted result as a base64-encoded string
      through the Nix language via a new primop openssl.export-decryptable-pkey.
 
   2. Symmetric Key Passphrase Export: the ability to retrieve the raw passphrase
@@ -87,8 +87,10 @@ Serialisation format (to_bytes / from_bytes):
 The random_secret is placed last so that splitn(3, ':') can be used safely even
 if the base64 string itself contains colons.
 
-The derive_aes_key method uses pbkdf2_hmac with SHA-256 to derive a 32-byte AES
-key from the random_secret and a provided salt.
+The derive_key_and_iv method uses pbkdf2_hmac with SHA-256 to derive 32 bytes
+from the random_secret and a provided salt, then splits them into a 16-byte AES
+key (first 16 bytes) and a 16-byte IV (last 16 bytes). This matches exactly the
+behaviour of `openssl enc -aes-128-cbc -pbkdf2` when deriving the key and IV.
 
 2.1.4 SymmetricKeyIdentity (private newtype)
 
@@ -109,14 +111,18 @@ to produce random_secret, and constructs a SymmetricKeyValue.
 
     pub struct EncryptionParams {
         pub salt: Vec<u8>,
-        pub iv: Vec<u8>,
     }
 
-EncryptionParams stores the salt (8 bytes) and IV (16 bytes) used to encrypt a
-specific (symmetric_key, credential) pair. By persisting these in the store,
-calling export_decryptable with the same key, credential, and store always
-produces identical ciphertext output. This is important for referential
-transparency in the Nix evaluation model.
+EncryptionParams stores only the salt (8 bytes) used to encrypt a specific
+(symmetric_key, credential) pair. The IV is not stored separately — it is
+derived deterministically from the passphrase and salt by PBKDF2, exactly as
+`openssl enc -pbkdf2` does. By persisting the salt in the store, calling
+export_decryptable with the same key, credential, and store always produces
+identical ciphertext output. This is important for referential transparency in
+the Nix evaluation model.
+
+Serialisation format (to_bytes / from_bytes): the salt bytes are stored
+directly with no framing.
 
 EncryptionParamsKey is a private struct that implements IsCryptoStoreKey for
 EncryptionParams. Its store key is derived by hashing the string
@@ -126,15 +132,23 @@ pair.
 
 2.1.6 encrypt_to_pem (private function)
 
-This function encrypts a plaintext byte vector using AES-128-CBC and returns a
-PEM-formatted string. The payload layout follows the OpenSSL enc format:
+Despite its name, this function does not produce a PEM-formatted string. It
+encrypts a plaintext byte vector using AES-128-CBC and returns a raw
+base64-encoded string with no PEM envelope headers or footers.
+
+The key and IV are derived together from the passphrase and salt using
+PBKDF2-HMAC-SHA256, deriving 32 bytes total and splitting them into a 16-byte
+key and a 16-byte IV. This matches the behaviour of `openssl enc -aes-128-cbc
+-pbkdf2`.
+
+The payload layout follows the OpenSSL enc format:
 
     "Salted__" (8 bytes) | salt (8 bytes) | ciphertext
 
-The whole payload is base64-encoded and wrapped in a PEM envelope with the
-header "-----BEGIN ENCRYPTED DATA-----" and footer
-"-----END ENCRYPTED DATA-----". The base64 body is line-wrapped at 64
-characters per line, as is standard for PEM.
+The whole payload is base64-encoded and line-wrapped at 64 characters per line.
+No PEM headers or footers are included. The output is therefore compatible with
+`openssl enc -d -base64 -aes-128-cbc -pbkdf2`, which expects raw base64 input
+without PEM headers.
 
 2.1.7 export_decryptable (public free function)
 
@@ -156,9 +170,9 @@ This is the main entry point for the export-decryptable feature. It:
      value.
   3. Constructs an EncryptionParamsKey from the symmetric key identity and the
      credential, and calls get_or_derive to obtain or generate the
-     EncryptionParams (salt and IV).
+     EncryptionParams (salt only).
   4. Calls credential_value.export() to obtain the plaintext bytes.
-  5. Calls encrypt_to_pem to produce the final PEM string.
+  5. Calls encrypt_to_pem to produce the final base64-encoded string.
 
 2.1.8 get_symmetric_key_passphrase (public free function)
 
@@ -574,11 +588,11 @@ The main.rs module was updated to:
   decryptable::export_decryptable:
     1. get_or_derive(SymmetricKeyIdentity(key)) -> SymmetricKeyValue
     2. get_or_derive(OpensslPrivateKeyIdentityWrapper(credential)) -> Key
-    3. get_or_derive(EncryptionParamsKey(sym_id, cred)) -> EncryptionParams
+    3. get_or_derive(EncryptionParamsKey(sym_id, cred)) -> EncryptionParams (salt only)
     4. credential_value.export() -> Vec<u8> (PEM bytes of private key)
-    5. encrypt_to_pem(sym_key_value, salt, iv, plaintext) -> PEM String
+    5. encrypt_to_pem(sym_key_value, salt, plaintext) -> base64-encoded String
 
-  The resulting PEM string is returned up the call stack and set as a Nix
+  The resulting base64 string is returned up the call stack and set as a Nix
   string value.
 
 6.2 Symmetric Key Passphrase Export (CLI path)
@@ -605,6 +619,21 @@ The main.rs module was updated to:
        symmetric_key_value.random_secret.
     5. Writes the passphrase string to the output file.
 
+6.3 Decryption (manual / test path)
+
+  Given the base64-encoded encrypted output and the passphrase retrieved via
+  nix-crypto-service, the private key can be decrypted using:
+
+    openssl enc -d -base64 -aes-128-cbc -pbkdf2 \
+      -iter <iterations> \
+      -pass file:<passphrase_file> \
+      -in <encrypted_file> \
+      -out <decrypted_key_file>
+
+  The `-base64` flag is required because the output of export_decryptable is
+  raw base64 without PEM headers. The `-pbkdf2` flag and `-iter` value must
+  match those used during encryption.
+
 
 7. SECURITY NOTES
 ------------------
@@ -613,19 +642,23 @@ The main.rs module was updated to:
     cryptographically secure random number generator.
   - The random_secret is 16 bytes (128 bits) of entropy, base64-encoded to a
     24-character string.
-  - The AES key is derived from random_secret using PBKDF2-HMAC-SHA256 with a
-    configurable iteration count. The default is 600,000 iterations, which is
-    consistent with current NIST recommendations for PBKDF2 with SHA-256.
-  - A unique salt and IV are generated for each (symmetric_key, credential)
-    pair and persisted in the store. This ensures that the same plaintext
-    encrypted with the same key always produces the same ciphertext (required
-    for Nix referential transparency), while preventing IV reuse across
-    different (key, credential) pairs.
+  - The AES key and IV are derived together from random_secret using
+    PBKDF2-HMAC-SHA256 with a configurable iteration count. 32 bytes are
+    derived in total: the first 16 bytes are used as the AES-128 key and the
+    last 16 bytes are used as the IV. This matches the behaviour of
+    `openssl enc -aes-128-cbc -pbkdf2`. The default iteration count is
+    600,000, which is consistent with current NIST recommendations for
+    PBKDF2 with SHA-256.
+  - A unique salt is generated for each (symmetric_key, credential) pair and
+    persisted in the store. This ensures that the same plaintext encrypted with
+    the same key always produces the same ciphertext (required for Nix
+    referential transparency), while preventing key/IV reuse across different
+    (key, credential) pairs.
   - The passphrase (random_secret) written to disk by nix-crypto-service is
     sensitive. The caller is responsible for ensuring the output file has
     appropriate permissions.
   - Private keys are never exposed in the Nix language. The export-decryptable-pkey
-    primop returns an encrypted PEM string, not the raw private key.
+    primop returns a base64-encoded encrypted string, not the raw private key.
 
 
 8. COMMIT HISTORY
@@ -641,3 +674,6 @@ The following commits were made during this session:
              out of export.rs
   c0dda88  feat: add openssl-symmetric-key export support to
              nix-crypto-service
+  c2a1393  fix: change AES-128-CBC to AES-256-CBC to match 32-byte derived key
+  e1b1da5  fix: derive key and IV together via PBKDF2 for openssl enc
+             compatibility
