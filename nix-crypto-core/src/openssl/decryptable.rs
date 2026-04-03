@@ -110,22 +110,26 @@ impl SymmetricKeyValue {
         Ok(SymmetricKeyValue { random_secret, key_derivation, iterations })
     }
 
-
-    /// Derive a 128-bit AES key from a passphrase using the specified
-    /// key derivation method.
-    fn derive_aes_key(&self, salt: &[u8]) -> Result<Vec<u8>, Error> {
-
+    /// Derive a key and IV from the passphrase and salt using PBKDF2-HMAC-SHA256.
+    ///
+    /// For AES-128-CBC, `openssl enc -pbkdf2` derives `key_len + iv_len` = 32 bytes
+    /// total from the passphrase, then splits them: first 16 bytes are the key,
+    /// last 16 bytes are the IV. We replicate that behaviour here so that the
+    /// output is compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
+    fn derive_key_and_iv(&self, salt: &[u8]) -> Result<(Vec<u8>, Vec<u8>), Error> {
         match self.key_derivation {
             KeyDerivation::PBKDF2 => {
-                let mut key = vec![0u8; 16];
+                let mut key_and_iv = vec![0u8; 32];
                 pbkdf2_hmac(
                     self.random_secret.as_bytes(),
                     salt,
                     self.iterations as usize,
                     MessageDigest::sha256(),
-                    &mut key,
+                    &mut key_and_iv,
                 )?;
-                Ok(key)
+                let key = key_and_iv[..16].to_vec();
+                let iv  = key_and_iv[16..].to_vec();
+                Ok((key, iv))
             }
         }
     }
@@ -167,7 +171,6 @@ for SymmetricKeyIdentity<'a, T> {
         Ok(value.to_bytes())
     }
 
-
     fn from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
         SymmetricKeyValue::from_bytes(value)
     }
@@ -192,48 +195,34 @@ for SymmetricKeyIdentity<'a, T> {
 // EncryptionParams
 // ============================================================================
 
-/// Stores the salt and IV used to encrypt a specific `(symmetric_key, credential)`
-/// pair. By persisting these in the store we guarantee that calling
+/// Stores the salt used to encrypt a specific `(symmetric_key, credential)`
+/// pair. By persisting this in the store we guarantee that calling
 /// `export_decryptable` with the same key, credential, and store always
 /// produces identical output.
+///
+/// The IV is not stored separately — it is derived deterministically from the
+/// passphrase and salt by PBKDF2, exactly as `openssl enc -pbkdf2` does.
 pub struct EncryptionParams {
     pub salt: Vec<u8>,
-    pub iv: Vec<u8>,
 }
 
 impl EncryptionParams {
     fn generate() -> Result<Self, Error> {
         let mut salt = vec![0u8; 8];
-        let mut iv = vec![0u8; 16];
         rand_bytes(&mut salt)?;
-        rand_bytes(&mut iv)?;
-        Ok(EncryptionParams { salt, iv })
+        Ok(EncryptionParams { salt })
     }
 
-    /// Serialize as `<salt_len_1_byte><salt><iv>`.
+    /// Serialize as the raw salt bytes.
     fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.salt.len() as u8);
-        bytes.extend_from_slice(&self.salt);
-        bytes.extend_from_slice(&self.iv);
-        bytes
+        self.salt.clone()
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.is_empty() {
             return Err(Error::from_message("EncryptionParams bytes are empty".to_string()));
         }
-
-        let salt_len = bytes[0] as usize;
-
-        if bytes.len() < 1 + salt_len {
-            return Err(Error::from_message("EncryptionParams bytes too short for salt".to_string()));
-        }
-
-        let salt = bytes[1..1 + salt_len].to_vec();
-        let iv = bytes[1 + salt_len..].to_vec();
-
-        Ok(EncryptionParams { salt, iv })
+        Ok(EncryptionParams { salt: bytes.to_vec() })
     }
 }
 
@@ -286,7 +275,12 @@ where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
 const PEM_HEADER: &str = "-----BEGIN ENCRYPTED DATA-----";
 const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
 
-/// Encrypt `plaintext` with AES-128-CBC and return a PEM-encoded string.
+/// Encrypt `plaintext` with AES-128-CBC and return a PEM-encoded string
+/// compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
+///
+/// The key and IV are derived from the passphrase and salt using
+/// PBKDF2-HMAC-SHA256, deriving 32 bytes total and splitting them into
+/// a 16-byte key and a 16-byte IV — exactly as `openssl enc -pbkdf2` does.
 ///
 /// The payload layout matches the OpenSSL `enc` format:
 ///   `Salted__` (8 bytes) | salt (8 bytes) | ciphertext
@@ -294,12 +288,11 @@ const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
 fn encrypt_to_pem(
     key: &SymmetricKeyValue,
     salt: &[u8],
-    iv: &[u8],
     plaintext: &Vec<u8>
 ) -> Result<String, Error> {
-    let key = key.derive_aes_key(salt)?;
+    let (aes_key, iv) = key.derive_key_and_iv(salt)?;
     let cipher = Cipher::aes_128_cbc();
-    let ciphertext = encrypt(cipher, &key, Some(iv), plaintext)?;
+    let ciphertext = encrypt(cipher, &aes_key, Some(&iv), plaintext)?;
 
     let mut payload = Vec::new();
     payload.extend_from_slice(b"Salted__");
@@ -324,11 +317,12 @@ fn encrypt_to_pem(
 // ============================================================================
 
 /// Export a credential encrypted with a symmetric key, returning a
-/// PEM-formatted string containing the AES-128-CBC encrypted credential.
+/// PEM-formatted string containing the AES-128-CBC encrypted credential,
+/// compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
 ///
 /// Calling this function multiple times with the same `key`, `credential`,
-/// and store will always produce identical output, because the salt and IV
-/// are stored in the `CryptoStore` on the first call and reused thereafter.
+/// and store will always produce identical output, because the salt is
+/// stored in the `CryptoStore` on the first call and reused thereafter.
 pub fn export_decryptable<K, C>(
     crypto_nix: &CryptoNix,
     key: &K,
@@ -344,23 +338,23 @@ where
     let symmetric_identity = SymmetricKeyIdentity(key);
     let symmetric_key_value = crypto_nix.get_or_derive(&symmetric_identity)?;
 
-    // Step 2: Get or derive the credential value
+    // Step 2: Get or derive the credential value.
     let credential_value = crypto_nix.get_or_derive(credential)?;
 
-    // Encription parameters are unique per key/credential combination. This
-    // is important as the security of AES becomes weaker if the IV is
-    // reused on different plaintext inputs.
+    // Step 3: Get or derive the encryption params (salt) for this
+    // (key, credential) pair. Using a unique salt per pair ensures that
+    // encrypting the same credential with different keys produces different
+    // ciphertext, preventing IV reuse.
     let encryption_params_key = EncryptionParamsKey::new(&symmetric_identity, credential);
     let encryption_params = crypto_nix.get_or_derive(&encryption_params_key)?;
 
-    // Step 4: Export the credential to plaintext bytes
+    // Step 4: Export the credential to plaintext bytes.
     let plaintext = credential_value.export()?;
 
-    // Step 5: Encrypt and return as PEM
+    // Step 5: Encrypt and return as PEM.
     encrypt_to_pem(
         &symmetric_key_value,
         &encryption_params.salt,
-        &encryption_params.iv,
         &plaintext
     )
 }

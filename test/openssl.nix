@@ -116,14 +116,14 @@ in
       `--identity-type openssl-symmetric-key`, and that the decrypted key can be
       used to sign data.
 
+      The encryption is AES-128-CBC with PBKDF2-HMAC-SHA256 key derivation,
+      compatible with `openssl enc -aes-128-cbc -pbkdf2`.
+
       The `NIX_CRYPTO_STORE` environment variable must point to the same sled store
       used by the nix-crypto plugin so that `nix-crypto-service` can locate the
       symmetric key.
     */
     "It can export decryptable key" = { _assert, ... }:
-    let
-      key-identity = pk-rsa.identity;
-    in
       _assert.bash-script
       ''
         ENCRYPTED_PEM_FILE=$(mktemp)
@@ -148,11 +148,9 @@ in
           --log-file "$NIX_CRYPTO_LOG" \
           --log-level debug
 
-        echo "The key"
-        cat "$PASSPHRASE_FILE"
-        echo -e "\n"
-
-        # Decrypt the encrypted PEM using the passphrase and AES-128-CBC/PBKDF2
+        # Decrypt the encrypted PEM using the passphrase.
+        # The key and IV are derived from the passphrase and salt using
+        # PBKDF2-HMAC-SHA256, matching the derivation done in decryptable.rs.
         openssl enc -d -aes-128-cbc -pbkdf2 \
           -iter ${toString symmetric-key-params.iterations} \
           -pass file:"$PASSPHRASE_FILE" \
