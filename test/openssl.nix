@@ -148,6 +148,10 @@ in
           --log-file "$NIX_CRYPTO_LOG" \
           --log-level debug
 
+        echo "The key"
+        cat "$PASSPHRASE_FILE"
+        echo -e "\n"
+
         # Decrypt the encrypted PEM using the passphrase and AES-128-CBC/PBKDF2
         openssl enc -d -aes-128-cbc -pbkdf2 \
           -iter ${toString symmetric-key-params.iterations} \

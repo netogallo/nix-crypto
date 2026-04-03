@@ -117,7 +117,7 @@ impl SymmetricKeyValue {
 
         match self.key_derivation {
             KeyDerivation::PBKDF2 => {
-                let mut key = vec![0u8; 32];
+                let mut key = vec![0u8; 16];
                 pbkdf2_hmac(
                     self.random_secret.as_bytes(),
                     salt,
