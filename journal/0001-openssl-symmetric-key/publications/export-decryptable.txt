@@ -1,0 +1,255 @@
+Exporting Encrypted Credentials from Nix: Keeping Private Keys Out of the Store
+================================================================================
+
+Introduction
+------------
+
+If you have ever tried to do serious cryptography in a Nix-based system, you
+have likely run into the same fundamental problem: Nix is a purely functional
+build system, and everything that passes through it ends up in the Nix store.
+The store is world-readable by default. Private keys, passphrases, and other
+sensitive credentials have no business being there.
+
+The nix-crypto project addresses this problem by implementing cryptographic
+operations as Nix primops -- built-in functions evaluated by the Nix interpreter
+itself -- backed by a credential store that lives entirely outside the Nix store.
+Private keys are generated, stored, and used without ever being exposed as Nix
+values.
+
+This post introduces a new feature in nix-crypto: export-decryptable-pkey. It
+allows you to export an OpenSSL private key from the credential store in an
+encrypted form that is safe to embed in a Nix derivation, and to decrypt it
+later using a passphrase retrieved via the nix-crypto-service CLI tool.
+
+
+The Problem
+-----------
+
+Consider a common scenario: you have a private key managed by nix-crypto, and
+you need to make it available to a service at runtime -- for example, to sign
+artefacts in a CI pipeline, or to configure a TLS endpoint. The key must leave
+the credential store at some point. The question is: in what form, and how do
+you ensure it does not end up somewhere it should not?
+
+A naive approach would be to export the raw PEM and write it into a derivation.
+This is exactly what nix-crypto prevents: the private key would land in the Nix
+store, be copied to /nix/store/..., and be readable by any process on the
+machine.
+
+A better approach is to export the key in encrypted form. The encrypted blob is
+safe to store anywhere -- it is useless without the passphrase. The passphrase
+itself is kept in the credential store and retrieved separately at runtime,
+outside of Nix evaluation.
+
+This is exactly what export-decryptable-pkey does.
+
+
+How It Works
+------------
+
+The feature has two parts.
+
+
+Part 1: Nix-side -- exporting the encrypted key
+------------------------------------------------
+
+At Nix evaluation time, you call export-decryptable-pkey on a private key
+object, passing a set of symmetric key parameters:
+
+    pk-rsa = openssl.private-key {
+      attrs = { vault = "openssl"; name = "my-key"; };
+      type = "rsa";
+    };
+
+    encrypted-key = pk-rsa.export-decryptable-pkey {
+      key-id = "my-symmetric-key";
+      key-derivation = "pbkdf2";
+      iterations = 600000;
+    };
+
+The result, encrypted-key, is a base64-encoded string containing the private
+key encrypted with AES-128-CBC. The encryption key and IV are derived from a
+randomly generated passphrase using PBKDF2-HMAC-SHA256 with 600,000 iterations.
+The passphrase itself is stored in the credential store -- it never appears as a
+Nix value.
+
+Crucially, the encrypted output is deterministic: calling export-decryptable-pkey
+with the same key and the same symmetric key parameters will always produce the
+same ciphertext. This is because the salt used for key derivation is generated
+once and persisted in the credential store alongside the passphrase. Nix's
+referential transparency is preserved.
+
+
+Part 2: Runtime -- decrypting the key
+--------------------------------------
+
+At runtime, you retrieve the passphrase using the nix-crypto-service CLI tool:
+
+    nix-crypto-service export secret \
+      --sled-store /path/to/store \
+      --identity-type openssl-symmetric-key \
+      --openssl-symmetric-key-id "my-symmetric-key" \
+      --openssl-symmetric-key-derivation pbkdf2 \
+      --openssl-symmetric-key-iterations 600000 \
+      --output-file /run/secrets/passphrase
+
+With the passphrase in hand, you can decrypt the key using the standard
+openssl enc command:
+
+    openssl enc -d -base64 -aes-128-cbc -pbkdf2 \
+      -iter 600000 \
+      -pass file:/run/secrets/passphrase \
+      -in encrypted-key.b64 \
+      -out private-key.pem
+
+The decrypted private-key.pem is now available for use by your service. It was
+never stored in the Nix store, and the passphrase was never exposed during Nix
+evaluation.
+
+
+The Cryptography
+----------------
+
+The encryption scheme is designed to be compatible with the standard openssl enc
+tool, so that no special tooling is required to decrypt the key at runtime.
+
+  Cipher:        AES-128-CBC
+  Key derivation: PBKDF2-HMAC-SHA256
+  Iterations:    Configurable, defaulting to 600,000 (consistent with current
+                 NIST recommendations for PBKDF2 with SHA-256)
+  Salt:          8 bytes, randomly generated per (key, credential) pair and
+                 persisted in the credential store
+  Key and IV:    Derived together by running PBKDF2 to produce 32 bytes, then
+                 splitting them -- the first 16 bytes become the AES key and
+                 the last 16 bytes become the IV. This matches exactly the
+                 behaviour of "openssl enc -pbkdf2".
+
+The passphrase is a base64-encoded 16-byte (128-bit) random value generated
+using OpenSSL's rand_bytes. It is stored in the credential store on the first
+call and reused on subsequent calls, ensuring that the encrypted output is
+stable across multiple Nix evaluations.
+
+
+Security Properties
+-------------------
+
+The private key never appears in the Nix store. The export-decryptable-pkey
+primop returns an encrypted blob. The plaintext key exists only in the
+credential store (as an opaque value) and in memory during the encryption
+operation.
+
+The passphrase never appears in the Nix store. It is stored in the credential
+store and retrieved at runtime via nix-crypto-service. It is never interpolated
+into a Nix string or passed through the Nix evaluator.
+
+The encrypted output is safe to store in the Nix store. Without the passphrase,
+the encrypted blob is computationally infeasible to decrypt. The 600,000-
+iteration PBKDF2 makes brute-force attacks against the passphrase expensive.
+
+Each (key, passphrase) pair has a unique salt. This prevents IV reuse across
+different credentials encrypted with the same symmetric key, which would weaken
+the security of AES-CBC.
+
+The passphrase file written by nix-crypto-service is sensitive. It should be
+written to a location with appropriate permissions -- for example, a tmpfs mount
+accessible only to the target service -- and deleted after use.
+
+
+Architecture Overview
+---------------------
+
+The feature spans three layers of the nix-crypto stack:
+
+  Nix evaluation
+    export-decryptable-pkey primop (C++)
+      CryptoNixPrimops::opensslExportDecryptableOpensslPkey
+        CxxNixCrypto::cxx_export_decryptable_openssl_pkey  (Rust/CXX bridge)
+          decryptable::export_decryptable  (Rust core library)
+            get_or_derive(SymmetricKeyIdentity)              -> passphrase
+            get_or_derive(OpensslPrivateKeyIdentityWrapper)  -> private key
+            get_or_derive(EncryptionParamsKey)               -> salt
+            encrypt_to_pem(passphrase, salt, plaintext)      -> base64 string
+
+  Runtime
+    nix-crypto-service export secret --identity-type openssl-symmetric-key
+      decryptable::get_symmetric_key_passphrase  (Rust core library)
+        get_or_derive(SymmetricKeyIdentity)                  -> passphrase string
+
+The credential store (backed by the sled embedded database) is the single source
+of truth for all secrets. Both the Nix plugin and nix-crypto-service access the
+same store, identified by the NIX_CRYPTO_STORE environment variable or the
+--sled-store flag.
+
+
+Example: Signing Artefacts in CI
+---------------------------------
+
+Here is a complete example of how you might use this feature to sign build
+artefacts in a CI pipeline.
+
+In your Nix configuration:
+
+    let
+      signing-key = openssl.private-key {
+        attrs = { vault = "ci"; name = "artefact-signing-key"; };
+        type = "rsa";
+      };
+
+      encrypted-signing-key = signing-key.export-decryptable-pkey {
+        key-id = "ci-artefact-signing-passphrase";
+        key-derivation = "pbkdf2";
+        iterations = 600000;
+      };
+    in
+      {
+        # Safe to include in a derivation -- this is just an encrypted blob
+        inherit encrypted-signing-key;
+
+        # The public key is also safe to expose
+        signing-public-key = signing-key.public-key-pem;
+      }
+
+In your CI script:
+
+    # Retrieve the passphrase from the credential store
+    nix-crypto-service export secret \
+      --identity-type openssl-symmetric-key \
+      --openssl-symmetric-key-id "ci-artefact-signing-passphrase" \
+      --openssl-symmetric-key-derivation pbkdf2 \
+      --openssl-symmetric-key-iterations 600000 \
+      --output-file /run/secrets/signing-passphrase
+
+    # Decrypt the signing key
+    openssl enc -d -base64 -aes-128-cbc -pbkdf2 \
+      -iter 600000 \
+      -pass file:/run/secrets/signing-passphrase \
+      -in $encrypted_signing_key \
+      -out /run/secrets/signing-key.pem
+
+    # Sign the artefact
+    openssl dgst -sha256 -sign /run/secrets/signing-key.pem \
+      -out artefact.sig artefact.tar.gz
+
+    # Clean up
+    rm /run/secrets/signing-key.pem /run/secrets/signing-passphrase
+
+The private key and passphrase exist on disk only for the duration of the
+signing operation, in a location that is never copied to the Nix store.
+
+
+Conclusion
+----------
+
+The export-decryptable-pkey feature closes an important gap in the nix-crypto
+toolkit. It makes it possible to use private keys managed by nix-crypto in
+runtime contexts -- CI pipelines, system services, deployment scripts -- without
+ever exposing the raw key material through the Nix evaluator or the Nix store.
+
+The design is intentionally simple: standard openssl enc is all you need to
+decrypt the key at runtime. There is no custom tooling, no special runtime
+daemon, and no dependency on nix-crypto at the point of use. The credential
+store is only needed when retrieving the passphrase, which can be done once
+during system initialisation and then discarded.
+
+If you are building a system that needs to manage cryptographic credentials
+alongside Nix-based configuration, nix-crypto is worth a look.
