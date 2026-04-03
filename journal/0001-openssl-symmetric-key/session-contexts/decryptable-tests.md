@@ -450,3 +450,1676 @@ The key changes are:
 > Tokens: 17k sent, 1.8k received. Cost: $0.08 message, $0.23 session.  
 > Applied edit to test/openssl.nix  
 > Commit 864f654 feat: add decryptable key export test to openssl test suite  
+>  
+>  
+> ^C again to exit  
+>  
+>  
+> ^C KeyboardInterrupt  
+
+# aider chat started at 2026-04-03 10:49:42
+
+> /nix/store/q1rjcdma46lphjf3i0savyk3j0s9psj8-aider-chat-0.86.1/bin/aider --llm-history-file journal/0001-openssl-symmetric-key/session-contexts/decryptable-tests.llm.history --chat-history-file journal/0001-openssl-symmetric-key/session-contexts/decryptable-tests.md --input-history-file=/tmp/llm-history  
+> Aider v0.86.1  
+> Model: openrouter/anthropic/claude-sonnet-4.6 with whole edit format, infinite output  
+> Git repo: .git with 53 files  
+> Repo-map: using 4096 tokens, auto refresh  
+
+#### Do you know what you were doing?  
+
+Yes, I understand. I should:
+
+1. Identify which files need to be changed and ask you to add them to the chat first.
+2. Only then, once you've added the full file contents, output complete *file listings* with the entire content of each changed file — never skipping or eliding any content.
+
+I'm ready for your request!
+
+> Tokens: 10k sent, 72 received. Cost: $0.03 message, $0.03 session.  
+
+#### You were implemented a test. I restored the context from a file. Do you know what I am talking about?  
+
+I don't have any memory of previous conversations beyond what's in this current context. The context you restored doesn't contain details about a specific test implementation that was in progress.
+
+Could you describe what you were working on? For example:
+- What the test was supposed to test
+- Which files were involved
+- What had already been implemented
+
+That way I can pick up where you left off!
+
+> Tokens: 10k sent, 80 received. Cost: $0.03 message, $0.06 session.  
+
+#### /run cat /tmp/llm-history  
+> Add 19.0k tokens of command output to the chat? (Y)es/(N)o [Yes]: y  
+> Added 1774 lines of output to the chat.  
+
+#### Ok, I have added the history of our previous conversation. Are you aware now?  
+
+Yes, I'm aware. I can see from the history that:
+
+1. The task is defined in `journal/0001-openssl-symmetric-key/tasks/export-symmetric-key-test.md`
+2. A plan was agreed upon
+3. I was in the middle of implementing the changes to `test/openssl.nix` when the context was cut off
+
+Let me complete the implementation now:
+
+test/openssl.nix
+```
+/**
+  Test suite for OpenSSL functionality.
+
+  Accepts the following arguments:
+  - `pkgs`: the nixpkgs package set.
+  - `nix-crypto-service`: path to the `nix-crypto-service` binary.
+*/
+{ pkgs, nix-crypto-service, ... }:
+let
+  crypto = pkgs.callPackage ../crypto/default.nix {};
+  inherit (crypto) openssl;
+
+  # Generates an RSA key or returns the existing one from the store.
+  # The private key itself is not returned — only operations that can
+  # be performed with it.
+  pk-rsa = openssl.private-key { 
+    attrs = {
+      vault = "openssl";
+      name = "openssl-test-key";
+    };
+    type = "rsa";
+  };
+
+  # Symmetric key parameters used to encrypt the private key.
+  # The same parameters must be passed to nix-crypto-service when
+  # retrieving the passphrase.
+  symmetric-key-params = {
+    key-id = "openssl-test-symmetric-key";
+    key-derivation = "pbkdf2";
+    iterations = 600000;
+  };
+
+  # The encrypted PEM string produced by the nix-crypto plugin.
+  encrypted-pkey-pem = pk-rsa.export-decryptable-pkey symmetric-key-params;
+in
+  {
+    # Asserts that the plugin can generate or retrieve a public key in PEM format.
+    "It can generate a public/private key set" = { _assert, ... }:
+      _assert.is-string pk-rsa.public-key-pem
+    ;
+
+    # Asserts that the plugin can build a self-signed X.509 certificate
+    # signed by the RSA key.
+    "It can generate a x509 self-signed certificate" = { _assert, ... }:
+    let
+      x509 = pk-rsa.x509 {
+        subject-name = { CN = "subject"; };
+        issuer-name = { CN = "issuer"; };
+        serial = 1;
+        start-date = "2026-01-09T21:29:36Z";
+        expiry-date = "2036-01-09T21:29:36Z";
+      };
+    in
+      # Derivation which outputs the public certificate of the CA
+      # safe to write into the nix store.
+      _assert.strings.has-prefix "-----BEGIN CERTIFICATE-----" x509.certificate-pem
+    ;
+
+    /**
+      Asserts that a private key stored by the nix-crypto plugin can be exported
+      using `nix-crypto-service export secret`, and that the public key derived
+      from the exported private key matches the public key computed by the plugin.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store used
+      by the nix-crypto plugin so that `nix-crypto-service` can locate the key.
+    */
+    "It can export the private key" = { _assert, ... }:
+    let
+      # The public key pem as computed by the nix plugin
+      expected-public-key-pem = pk-rsa.public-key-pem;
+      # The identity of the key, used to locate it in the store
+      key-identity = pk-rsa.identity;
+    in
+      _assert.bash-script
+      ''
+        PRIVATE_KEY_FILE=$(mktemp)
+        EXPECTED_PUBLIC_KEY_FILE=$(mktemp)
+        RANDOM_FILE=$(mktemp)
+        SIGNATURE_FILE=$(mktemp)
+
+        # Write the expected public key pem to a temp file
+        cat > "$EXPECTED_PUBLIC_KEY_FILE" << 'EOF'
+        ${expected-public-key-pem}
+        EOF
+
+        # Export the private key using nix-crypto-service
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-pkey \
+          --openssl-pkey-type rsa \
+          --openssl-pkey-id "${key-identity}" \
+          --output-file "$PRIVATE_KEY_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the exported private key
+        openssl dgst -sha256 -sign "$PRIVATE_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"
+
+        # Verify the signature using the expected public key
+        if ! openssl dgst -sha256 -verify "$EXPECTED_PUBLIC_KEY_FILE" -signature "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+        exit 0
+      ''
+    ;
+
+    /**
+      Asserts that a private key stored by the nix-crypto plugin can be exported
+      in encrypted form using `export-decryptable-pkey`, and that the key can be
+      decrypted using the passphrase retrieved via `nix-crypto-service export secret`
+      with `--identity-type openssl-symmetric-key`.
+
+      Steps:
+        1. The encrypted PEM is produced by the nix-crypto plugin at evaluation time.
+        2. The passphrase is retrieved from the store using nix-crypto-service.
+        3. The openssl enc command decrypts the PEM using the passphrase.
+        4. The decrypted key is used to sign a random value, asserting it is valid.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store used
+      by the nix-crypto plugin so that `nix-crypto-service` can locate the symmetric key.
+    */
+    "It can export decryptable key" = { _assert, ... }:
+    let
+      key-identity = pk-rsa.identity;
+    in
+      _assert.bash-script
+      ''
+        ENCRYPTED_PEM_FILE=$(mktemp)
+        PASSPHRASE_FILE=$(mktemp)
+        DECRYPTED_KEY_FILE=$(mktemp)
+        RANDOM_FILE=$(mktemp)
+        SIGNATURE_FILE=$(mktemp)
+
+        # Write the encrypted PEM produced by the nix-crypto plugin to a temp file
+        cat > "$ENCRYPTED_PEM_FILE" << 'EOF'
+        ${encrypted-pkey-pem}
+        EOF
+
+        # Retrieve the passphrase used to encrypt the private key
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-symmetric-key \
+          --openssl-symmetric-key-id "openssl-test-symmetric-key" \
+          --openssl-symmetric-key-derivation pbkdf2 \
+          --openssl-symmetric-key-iterations 600000 \
+          --output-file "$PASSPHRASE_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        # Decrypt the private key using the passphrase
+        openssl enc -d -aes-128-cbc -pbkdf2 \
+          -iter 600000 \
+          -pass file:"$PASSPHRASE_FILE" \
+          -in "$ENCRYPTED_PEM_FILE" \
+          -out "$DECRYPTED_KEY_FILE"
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the decrypted private key.
+        # If openssl reports no errors, the test is successful.
+        openssl dgst -sha256 -sign "$DECRYPTED_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"
+
+        exit 0
+      ''
+    ;
+  }
+```
+
+> Tokens: 29k sent, 1.7k received. Cost: $0.11 message, $0.18 session.  
+> journal/0001-openssl-symmetric-key/tasks/export-symmetric-key-test.md  
+> Add file to the chat? (Y)es/(N)o/(A)ll/(S)kip all/(D)on't ask again [Yes]: y  
+> test/openssl.nix  
+> Add file to the chat? (Y)es/(N)o/(A)ll/(S)kip all/(D)on't ask again [Yes]: y  
+
+Looking at the current `test/openssl.nix` that you've added to the chat, I can see it already contains the `"It can export decryptable key"` test that was implemented in our previous session.
+
+Comparing it against the task description in `journal/0001-openssl-symmetric-key/tasks/export-symmetric-key-test.md`, the test already correctly implements all 4 steps:
+
+1. ✅ Calls `export-decryptable-pkey` from nix code and writes the encrypted PEM to a temp file
+2. ✅ Uses `nix-crypto-service` with `--identity-type openssl-symmetric-key` to dump the passphrase to a temp file
+3. ✅ Uses `openssl enc -d -aes-128-cbc -pbkdf2` to decrypt the key using the passphrase
+4. ✅ Uses `openssl dgst -sha256 -sign` to sign a value with the decrypted key
+
+**No changes are needed** — the task has already been fully implemented. The file is up to date.
+
+> Tokens: 28k sent, 213 received. Cost: $0.09 message, $0.26 session.  
+
+#### /ask  
+> Aider v0.86.1  
+> Model: openrouter/anthropic/claude-sonnet-4.6 with ask edit format, infinite output  
+> Git repo: .git with 53 files  
+> Repo-map: using 4096 tokens, auto refresh  
+> Added journal/0001-openssl-symmetric-key/tasks/export-symmetric-key-test.md to the chat.  
+> Added test/openssl.nix to the chat.  
+
+#### /run nix-crypto-check  
+> Add 2.1k tokens of command output to the chat? (Y)es/(N)o [Yes]: y  
+> Added 140 lines of output to the chat.  
+
+#### The test uncovered a bug in the implementation of the nix-cyrpto plugin. See the output above. Can you check the file at nix-crypto-core/src/openssl/decryptable.rs and see if you can determine what the issue is?  
+> nix-crypto-core/src/openssl/decryptable.rs  
+> Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]: y  
+
+Looking at `decryptable.rs`, I can see the bug.
+
+In `derive_aes_key`, a **32-byte** key is derived:
+
+```rust
+let mut key = vec![0u8; 32];
+pbkdf2_hmac(
+    self.random_secret.as_bytes(),
+    salt,
+    self.iterations as usize,
+    MessageDigest::sha256(),
+    &mut key,
+)?;
+```
+
+But in `encrypt_to_pem`, the cipher used is **AES-128-CBC**:
+
+```rust
+let cipher = Cipher::aes_128_cbc();
+```
+
+AES-128-CBC requires a **16-byte key**, but a 32-byte key is being derived. This is exactly what the OpenSSL error says:
+
+```
+invalid key length:crypto/evp/evp_enc.c
+```
+
+There are two ways to fix this:
+
+1. Change the key derivation to produce 16 bytes (`vec![0u8; 16]`) to match AES-128-CBC, or
+2. Change the cipher to `Cipher::aes_256_cbc()` to match the 32-byte key.
+
+**Option 2 is preferable** from a security standpoint since AES-256 is stronger. However, this would also require updating the `openssl enc` command in the test to use `-aes-256-cbc` instead of `-aes-128-cbc`.
+
+Which fix would you prefer?
+
+> Tokens: 33k sent, 289 received. Cost: $0.10 message, $0.37 session.  
+
+#### /code Please fix.  
+
+#### Please fix.  
+
+I'll fix this by changing the cipher to AES-256-CBC to match the 32-byte key, and updating the test to use `-aes-256-cbc` accordingly.
+
+nix-crypto-core/src/openssl/decryptable.rs
+```
+use openssl::pkcs5::pbkdf2_hmac;
+use openssl::hash::MessageDigest;
+use openssl::symm::{encrypt, Cipher};
+use openssl::rand::rand_bytes;
+
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+
+use crate::error::Error;
+use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
+use crate::store::{IsCryptoStoreKey, StoreHasher};
+use crate::openssl::pkey;
+
+// ============================================================================
+// Decryptable trait
+// ============================================================================
+
+/// A `Decryptable` value can be represented as a byte vector for the purpose
+/// of encryption. This is the plaintext representation that will be encrypted,
+/// not the encrypted representation itself.
+pub trait Decryptable {
+    fn export(&self) -> Result<Vec<u8>, Error>;
+}
+
+impl Decryptable for pkey::Key {
+    fn export(&self) -> Result<Vec<u8>, Error> {
+        self.key_to_pem()
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Enum that lists all the key derivation schemes supported
+/// by Nix Crypto for exporting decryptable credentials.
+pub enum KeyDerivation {
+    PBKDF2 = 0
+}
+
+impl KeyDerivation {
+
+    pub fn from_string(value: &String) -> Result<KeyDerivation, Error> {
+        match value.to_lowercase().as_str() {
+            "pbkdf2" => Ok(KeyDerivation::PBKDF2),
+            _ => Error::fail_with(
+                format!("The given string '{}' is not a valid key derivation method.", value)
+            )
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Result<KeyDerivation, Error> {
+
+        if value == (KeyDerivation::PBKDF2 as u8) {
+            Ok(KeyDerivation::PBKDF2)
+        }
+        else {
+            Error::fail_with(format!("Cannot convert '{}' into a KeyDerivation", value))
+        }
+    }
+}
+
+// ============================================================================
+// SymmetricKeyValue
+// ============================================================================
+
+/// The value stored in the `CryptoStore` for a symmetric key. Contains the
+/// randomly generated secret, the key derivation scheme, and the iteration
+/// count used for PBKDF2.
+pub struct SymmetricKeyValue {
+    pub random_secret: String,
+    pub key_derivation: KeyDerivation,
+    pub iterations: u32,
+}
+
+impl SymmetricKeyValue {
+    /// Serialize to bytes as `<key_derivation>:<iterations>:<random_secret>`.
+    fn to_bytes(&self) -> Vec<u8> {
+        format!("{}:{}:{}", (self.key_derivation as u8).clone(), self.iterations, self.random_secret)
+            .into_bytes()
+    }
+
+    /// Deserialize from bytes produced by `to_bytes`.
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let s = std::str::from_utf8(bytes)?;
+
+        // Split into at most 3 parts so the random_secret can itself contain ':'
+        let mut parts = s.splitn(3, ':');
+
+        let key_derivation_u8 = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing key_derivation in SymmetricKeyValue".to_string()))?
+            .to_string()
+            .parse::<u8>()
+            .map_err(|_| Error::from_message("Invalid key derivaiton for value.".to_string()))?;
+
+        let key_derivation = KeyDerivation::from_u8(key_derivation_u8)?;
+
+        let iterations_str = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing iterations in SymmetricKeyValue".to_string()))?;
+
+        let iterations = iterations_str
+            .parse::<u32>()
+            .map_err(|_| Error::from_message(format!("Invalid iterations value: {}", iterations_str)))?;
+
+        let random_secret = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing random_secret in SymmetricKeyValue".to_string()))?
+            .to_string();
+
+        Ok(SymmetricKeyValue { random_secret, key_derivation, iterations })
+    }
+
+
+    /// Derive a 256-bit AES key from a passphrase using the specified
+    /// key derivation method.
+    fn derive_aes_key(&self, salt: &[u8]) -> Result<Vec<u8>, Error> {
+
+        match self.key_derivation {
+            KeyDerivation::PBKDF2 => {
+                let mut key = vec![0u8; 32];
+                pbkdf2_hmac(
+                    self.random_secret.as_bytes(),
+                    salt,
+                    self.iterations as usize,
+                    MessageDigest::sha256(),
+                    &mut key,
+                )?;
+                Ok(key)
+            }
+        }
+    }
+}
+
+// ============================================================================
+// IsOpensslSymmetricKeyIdentity
+// ============================================================================
+
+/// Identifies an OpenSSL symmetric key. Implementors provide the key identity,
+/// derivation scheme, and PBKDF2 iteration count. The underlying
+/// `SymmetricKeyValue` (including the random secret) is derived and stored
+/// automatically.
+pub trait IsOpensslSymmetricKeyIdentity {
+    fn key_id(&self) -> &String;
+    fn key_derivation(&self) -> &String;
+    fn iterations(&self) -> u32;
+}
+
+/// A newtype wrapper around a reference to an arbitrary `IsOpensslSymmetricKeyIdentity`
+/// instance. The `IsCrytpoStoreKeyDerivable` trait for symmetric key identites
+/// is implemented through this type.
+struct SymmetricKeyIdentity<'a, T: IsOpensslSymmetricKeyIdentity>(pub &'a T);
+
+impl<'a, T : IsOpensslSymmetricKeyIdentity> IsCryptoStoreKey
+for SymmetricKeyIdentity<'a, T> {
+    type Value = SymmetricKeyValue;
+
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        let identity = self.0;
+        let iterations = identity.iterations();
+        hasher.update(identity.key_id().as_bytes());
+        hasher.update(identity.key_derivation().as_bytes());
+        hasher.update(&iterations.to_be_bytes());
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
+        Ok(value.to_bytes())
+    }
+
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
+        SymmetricKeyValue::from_bytes(value)
+    }
+}
+
+impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable
+for SymmetricKeyIdentity<'a, T> {
+    fn derive(&self) -> Result<SymmetricKeyValue, Error> {
+        let mut random_bytes = vec![0u8; 16];
+        rand_bytes(&mut random_bytes)?;
+        let random_secret = STANDARD.encode(&random_bytes);
+
+        Ok(SymmetricKeyValue {
+            random_secret,
+            key_derivation: KeyDerivation::from_string(&self.0.key_derivation())?,
+            iterations: self.0.iterations(),
+        })
+    }
+}
+
+// ============================================================================
+// EncryptionParams
+// ============================================================================
+
+/// Stores the salt and IV used to encrypt a specific `(symmetric_key, credential)`
+/// pair. By persisting these in the store we guarantee that calling
+/// `export_decryptable` with the same key, credential, and store always
+/// produces identical output.
+pub struct EncryptionParams {
+    pub salt: Vec<u8>,
+    pub iv: Vec<u8>,
+}
+
+impl EncryptionParams {
+    fn generate() -> Result<Self, Error> {
+        let mut salt = vec![0u8; 8];
+        let mut iv = vec![0u8; 16];
+        rand_bytes(&mut salt)?;
+        rand_bytes(&mut iv)?;
+        Ok(EncryptionParams { salt, iv })
+    }
+
+    /// Serialize as `<salt_len_1_byte><salt><iv>`.
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.salt.len() as u8);
+        bytes.extend_from_slice(&self.salt);
+        bytes.extend_from_slice(&self.iv);
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.is_empty() {
+            return Err(Error::from_message("EncryptionParams bytes are empty".to_string()));
+        }
+
+        let salt_len = bytes[0] as usize;
+
+        if bytes.len() < 1 + salt_len {
+            return Err(Error::from_message("EncryptionParams bytes too short for salt".to_string()));
+        }
+
+        let salt = bytes[1..1 + salt_len].to_vec();
+        let iv = bytes[1 + salt_len..].to_vec();
+
+        Ok(EncryptionParams { salt, iv })
+    }
+}
+
+/// The store key for `EncryptionParams`. It is derived by hashing the raw
+/// store keys of both the symmetric key identity and the credential identity,
+/// making it unique per `(key, credential)` pair.
+struct EncryptionParamsKey<'a, TKey, TCred> {
+    symmetric_key_identity: &'a TKey,
+    credential_identity: &'a TCred,
+}
+
+impl<'a, TKey, TCred> EncryptionParamsKey<'a, TKey, TCred> {
+    pub fn new(symmetric_key_identity: &'a TKey, credential_identity: &'a TCred) -> Self {
+        EncryptionParamsKey { symmetric_key_identity, credential_identity }
+    }
+}
+
+impl<'a, TKey, TCred> IsCryptoStoreKey
+for EncryptionParamsKey<'a, TKey, TCred>
+where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
+    type Value = EncryptionParams;
+
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        hasher.update(b"encryption_params");
+        hasher.update_with_identity(self.symmetric_key_identity);
+        hasher.update_with_identity(self.credential_identity);
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &EncryptionParams) -> Result<Vec<u8>, Error> {
+        Ok(value.to_bytes())
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<EncryptionParams, Error> {
+        EncryptionParams::from_bytes(value)
+    }
+}
+
+impl<'a, TKey, TCred> IsCryptoStoreKeyDerivable for EncryptionParamsKey<'a, TKey, TCred>
+where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
+    fn derive(&self) -> Result<EncryptionParams, Error> {
+        EncryptionParams::generate()
+    }
+}
+
+// ============================================================================
+// Encryption helpers
+// ============================================================================
+
+const PEM_HEADER: &str = "-----BEGIN ENCRYPTED DATA-----";
+const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
+
+/// Encrypt `plaintext` with AES-256-CBC and return a PEM-encoded string.
+///
+/// The payload layout matches the OpenSSL `enc` format:
+///   `Salted__` (8 bytes) | salt (8 bytes) | ciphertext
+/// The whole payload is Base64-encoded and wrapped in a PEM envelope.
+fn encrypt_to_pem(
+    key: &SymmetricKeyValue,
+    salt: &[u8],
+    iv: &[u8],
+    plaintext: &Vec<u8>
+) -> Result<String, Error> {
+    let key = key.derive_aes_key(salt)?;
+    let cipher = Cipher::aes_256_cbc();
+    let ciphertext = encrypt(cipher, &key, Some(iv), plaintext)?;
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(b"Salted__");
+    payload.extend_from_slice(salt);
+    payload.extend_from_slice(&ciphertext);
+
+    let b64 = STANDARD.encode(&payload);
+
+    // Wrap Base64 at 64 characters per line, as is standard for PEM
+    let pem_body = b64
+        .as_bytes()
+        .chunks(64)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(format!("{}\n{}\n{}", PEM_HEADER, pem_body, PEM_FOOTER))
+}
+
+// ============================================================================
+// export_decryptable
+// ============================================================================
+
+/// Export a credential encrypted with a symmetric key, returning a
+/// PEM-formatted string containing the AES-256-CBC encrypted credential.
+///
+/// Calling this function multiple times with the same `key`, `credential`,
+/// and store will always produce identical output, because the salt and IV
+/// are stored in the `CryptoStore` on the first call and reused thereafter.
+pub fn export_decryptable<K, C>(
+    crypto_nix: &CryptoNix,
+    key: &K,
+    credential: &C,
+) -> Result<String, Error>
+where
+    K: IsOpensslSymmetricKeyIdentity,
+    C: IsCryptoStoreKeyDerivable,
+    C::Value: Decryptable,
+{
+    // Step 1: Wrap the key in a SymmetricKeyIdentity and get or derive the
+    // symmetric key value (random_secret, derivation, iterations).
+    let symmetric_identity = SymmetricKeyIdentity(key);
+    let symmetric_key_value = crypto_nix.get_or_derive(&symmetric_identity)?;
+
+    // Step 2: Get or derive the credential value
+    let credential_value = crypto_nix.get_or_derive(credential)?;
+
+    // Encription parameters are unique per key/credential combination. This
+    // is important as the security of AES becomes weaker if the IV is
+    // reused on different plaintext inputs.
+    let encryption_params_key = EncryptionParamsKey::new(&symmetric_identity, credential);
+    let encryption_params = crypto_nix.get_or_derive(&encryption_params_key)?;
+
+    // Step 4: Export the credential to plaintext bytes
+    let plaintext = credential_value.export()?;
+
+    // Step 5: Encrypt and return as PEM
+    encrypt_to_pem(
+        &symmetric_key_value,
+        &encryption_params.salt,
+        &encryption_params.iv,
+        &plaintext
+    )
+}
+
+// ============================================================================
+// get_symmetric_key_passphrase
+// ============================================================================
+
+/// Retrieve (or derive and store) the random passphrase for the symmetric key
+/// identified by `key`. Returns the `random_secret` string which is the
+/// passphrase used as input to the key derivation function.
+///
+/// Calling this function multiple times with the same `key` and store will
+/// always return the same passphrase, because the `SymmetricKeyValue` is
+/// stored on the first call and reused thereafter.
+pub fn get_symmetric_key_passphrase<K: IsOpensslSymmetricKeyIdentity>(
+    crypto_nix: &CryptoNix,
+    key: &K,
+) -> Result<String, Error> {
+    let symmetric_identity = SymmetricKeyIdentity(key);
+    let value = crypto_nix.get_or_derive(&symmetric_identity)?;
+    Ok(value.random_secret)
+}
+```
+
+And update the test to use `-aes-256-cbc`:
+
+test/openssl.nix
+```
+/**
+  Test suite for OpenSSL functionality.
+
+  Accepts the following arguments:
+  - `pkgs`: the nixpkgs package set.
+  - `nix-crypto-service`: path to the `nix-crypto-service` binary.
+*/
+{ pkgs, nix-crypto-service, ... }:
+let
+  crypto = pkgs.callPackage ../crypto/default.nix {};
+  inherit (crypto) openssl;
+
+  # Generates an RSA key or returns the existing one from the store.
+  # The private key itself is not returned — only operations that can
+  # be performed with it.
+  pk-rsa = openssl.private-key { 
+    attrs = {
+      vault = "openssl";
+      name = "openssl-test-key";
+    };
+    type = "rsa";
+  };
+
+  # Symmetric key parameters used to encrypt the private key.
+  # The same parameters must be passed to nix-crypto-service when
+  # retrieving the passphrase.
+  symmetric-key-params = {
+    key-id = "openssl-test-symmetric-key";
+    key-derivation = "pbkdf2";
+    iterations = 600000;
+  };
+
+  # The encrypted PEM string produced by the nix-crypto plugin.
+  # This is evaluated at nix evaluation time and interpolated into
+  # the bash script below.
+  encrypted-pem = pk-rsa.export-decryptable-pkey symmetric-key-params;
+in
+  {
+    # Asserts that the plugin can generate or retrieve a public key in PEM format.
+    "It can generate a public/private key set" = { _assert, ... }:
+      _assert.is-string pk-rsa.public-key-pem
+    ;
+
+    # Asserts that the plugin can build a self-signed X.509 certificate
+    # signed by the RSA key.
+    "It can generate a x509 self-signed certificate" = { _assert, ... }:
+    let
+      x509 = pk-rsa.x509 {
+        subject-name = { CN = "subject"; };
+        issuer-name = { CN = "issuer"; };
+        serial = 1;
+        start-date = "2026-01-09T21:29:36Z";
+        expiry-date = "2036-01-09T21:29:36Z";
+      };
+    in
+      # Derivation which outputs the public certificate of the CA
+      # safe to write into the nix store.
+      _assert.strings.has-prefix "-----BEGIN CERTIFICATE-----" x509.certificate-pem
+    ;
+
+    /**
+      Asserts that a private key stored by the nix-crypto plugin can be exported
+      using `nix-crypto-service export secret`, and that the public key derived
+      from the exported private key matches the public key computed by the plugin.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store used
+      by the nix-crypto plugin so that `nix-crypto-service` can locate the key.
+    */
+    "It can export the private key" = { _assert, ... }:
+    let
+      # The public key pem as computed by the nix plugin
+      expected-public-key-pem = pk-rsa.public-key-pem;
+      # The identity of the key, used to locate it in the store
+      key-identity = pk-rsa.identity;
+    in
+      _assert.bash-script
+      ''
+        PRIVATE_KEY_FILE=$(mktemp)
+        EXPECTED_PUBLIC_KEY_FILE=$(mktemp)
+        RANDOM_FILE=$(mktemp)
+        SIGNATURE_FILE=$(mktemp)
+
+        # Write the expected public key pem to a temp file
+        cat > "$EXPECTED_PUBLIC_KEY_FILE" << 'EOF'
+        ${expected-public-key-pem}
+        EOF
+
+        # Export the private key using nix-crypto-service
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-pkey \
+          --openssl-pkey-type rsa \
+          --openssl-pkey-id "${key-identity}" \
+          --output-file "$PRIVATE_KEY_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the exported private key
+        openssl dgst -sha256 -sign "$PRIVATE_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"
+
+        # Verify the signature using the expected public key
+        if ! openssl dgst -sha256 -verify "$EXPECTED_PUBLIC_KEY_FILE" -signature "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+        exit 0
+      ''
+    ;
+
+    /**
+      Asserts that a private key stored by the nix-crypto plugin can be exported
+      in encrypted form using `export-decryptable-pkey`, that the passphrase used
+      to encrypt it can be retrieved using `nix-crypto-service export secret` with
+      `--identity-type openssl-symmetric-key`, and that the decrypted key can be
+      used to sign data.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store
+      used by the nix-crypto plugin so that `nix-crypto-service` can locate the
+      symmetric key.
+    */
+    "It can export decryptable key" = { _assert, ... }:
+    let
+      key-identity = pk-rsa.identity;
+    in
+      _assert.bash-script
+      ''
+        ENCRYPTED_PEM_FILE=$(mktemp)
+        PASSPHRASE_FILE=$(mktemp)
+        DECRYPTED_KEY_FILE=$(mktemp)
+        RANDOM_FILE=$(mktemp)
+        SIGNATURE_FILE=$(mktemp)
+
+        # Write the encrypted PEM (produced at nix evaluation time) to a temp file
+        cat > "$ENCRYPTED_PEM_FILE" << 'EOF'
+        ${encrypted-pem}
+        EOF
+
+        # Retrieve the passphrase used to encrypt the private key
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-symmetric-key \
+          --openssl-symmetric-key-id "${symmetric-key-params.key-id}" \
+          --openssl-symmetric-key-derivation "${symmetric-key-params.key-derivation}" \
+          --openssl-symmetric-key-iterations "${toString symmetric-key-params.iterations}" \
+          --output-file "$PASSPHRASE_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        # Decrypt the encrypted PEM using the passphrase and AES-256-CBC/PBKDF2
+        openssl enc -d -aes-256-cbc -pbkdf2 \
+          -iter ${toString symmetric-key-params.iterations} \
+          -pass file:"$PASSPHRASE_FILE" \
+          -in "$ENCRYPTED_PEM_FILE" \
+          -out "$DECRYPTED_KEY_FILE"
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the decrypted private key
+        if ! openssl dgst -sha256 -sign "$DECRYPTED_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+        exit 0
+      ''
+    ;
+  }
+```
+
+> Tokens: 33k sent, 4.8k received. Cost: $0.17 message, $0.54 session.  
+> Applied edit to test/openssl.nix  
+> Applied edit to nix-crypto-core/src/openssl/decryptable.rs  
+> Commit c2a1393 fix: change AES-128-CBC to AES-256-CBC to match 32-byte derived key  
+
+#### /undo  
+> Removed: c2a1393 fix: change AES-128-CBC to AES-256-CBC to match 32-byte derived key  
+> Now at:  8839579 WIP: update the context.  
+> You can use /undo to undo and discard each aider commit.  
+
+#### The openssl decryption step is failing with the error "bad magic numbher" what is this error?  
+
+The "bad magic number" error from `openssl enc -d` means that the data being decrypted does not start with the expected `Salted__` magic bytes. This happens when the input file does not match the format that `openssl enc` expects.
+
+Looking at the test, I suspect the issue is the **heredoc indentation**. In the bash script:
+
+```bash
+cat > "$ENCRYPTED_PEM_FILE" << 'EOF'
+        ${encrypted-pem}
+        EOF
+```
+
+The leading spaces before `${encrypted-pem}` and `EOF` are being included in the output. This means the PEM file will have leading whitespace on every line, corrupting the base64 content. The `EOF` terminator also needs to be at column 0 to be recognised by bash.
+
+To confirm this is the issue, please add `nix-crypto-core/src/openssl/decryptable.rs` to the chat so I can verify the exact PEM format being produced, and also check whether the same indentation issue exists in the working `"It can export the private key"` test for comparison.
+
+> Tokens: 38k sent, 223 received. Cost: $0.12 message, $0.66 session.  
+
+#### /call cat /tmp/nix-shell.XLXzpa/tmp.2NTZKPuIcS  
+> Invalid command: /call  
+
+#### /run cat /tmp/nix-shell.XLXzpa/tmp.2NTZKPuIcS  
+> Add 0.7k tokens of command output to the chat? (Y)es/(N)o [Yes]: y  
+> Added 17 lines of output to the chat.  
+
+#### The file you asked is alredy in the chat. I've also dumped the contents of the encrypted file that was generated in the test.  
+
+You're right, sorry. Looking at the file contents, the encrypted PEM looks correct — it starts with `-----BEGIN ENCRYPTED DATA-----` and the base64 content begins with `U2FsdGVkX1+` which is the base64 encoding of `Salted__`. So the file format is fine.
+
+Looking more carefully at the test in `test/openssl.nix`, I can see two problems:
+
+1. The `openssl enc` command is prefixed with `echo`, so it is **never actually executed** — it just prints the command:
+    ```bash
+    echo openssl enc -d -aes-128-cbc -pbkdf2 \
+    ```
+
+2. The cipher is `-aes-128-cbc` but `decryptable.rs` derives a **16-byte key** and uses `Cipher::aes_128_cbc()` — so the cipher actually matches now. However, our previous fix in commit `c2a1393` changed `decryptable.rs` to use AES-256-CBC with a 32-byte key, but looking at the **current file contents** you just added, `decryptable.rs` has been **reverted** back to AES-128-CBC with a 16-byte key.
+
+So the fix needed is simply to remove the `echo` from the `openssl enc` command in the test. Shall I update `test/openssl.nix`?
+
+> Tokens: 39k sent, 291 received. Cost: $0.12 message, $0.78 session.  
+
+#### I have removed the echo. Issue persists.  
+
+Looking at the current `decryptable.rs` more carefully:
+
+In `derive_aes_key`, the key is **16 bytes** (AES-128):
+```rust
+let mut key = vec![0u8; 16];
+```
+
+And in `encrypt_to_pem`, the cipher is `aes_128_cbc` — so those match.
+
+However, the test is using `-aes-128-cbc` with `-pbkdf2`. The `-pbkdf2` flag tells `openssl enc` to use its **own PBKDF2 implementation** to derive the key from the passphrase. But in `decryptable.rs`, the PBKDF2 derivation is done **manually** in Rust, and the resulting derived key is passed **directly** to `encrypt`. The `Salted__` header and salt are then prepended manually to the ciphertext.
+
+This means `openssl enc -d` is trying to re-derive the key from the passphrase using its own PBKDF2, but the file was **not encrypted that way** — the AES key was already derived in Rust before calling `encrypt`, and `openssl enc` doesn't know that.
+
+The fix is to change the `openssl enc` decryption command to pass the **derived AES key directly** using `-K` and `-iv` flags, rather than using `-pass` and `-pbkdf2`. Could you add `test/openssl.nix` to the chat so I can propose the corrected decryption command?
+
+> Tokens: 39k sent, 305 received. Cost: $0.12 message, $0.90 session.  
+
+#### I don't want to pass the key directly as it must be possible to decrypt the file by typing out the passphrase. Can the implementation of decryptable.rs rely on openssl libraries to generate the salt and pem envelope, rather than doing it manually?  
+
+Yes, that's a good approach. Instead of manually constructing the `Salted__` header and deriving the key in Rust, we can use OpenSSL's `openssl::symm::encrypt` with the higher-level `openssl::pkcs5` or simply let OpenSSL's `EVP_BytesToKey` handle the key derivation from the passphrase — which is what `openssl enc` uses internally.
+
+However, the cleanest solution would be to use the `openssl` crate's binding to `EVP_BytesToKey` to derive the key and IV from the passphrase and salt, exactly as `openssl enc` does. This way the encryption is fully compatible with `openssl enc -d`.
+
+Before I propose the fix, could you add the following files to the chat:
+
+1. `nix-crypto-core/Cargo.toml` — to see which version of the `openssl` crate is being used and what features are available.
+
+This will let me confirm whether `EVP_BytesToKey` is exposed in the Rust `openssl` crate bindings, or whether we need a different approach such as calling `openssl enc` as a subprocess to do the encryption, which would guarantee compatibility.
+
+> Tokens: 40k sent, 242 received. Cost: $0.12 message, $1.02 session.  
+> nix-crypto-core/Cargo.toml  
+> Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]: y  
+
+Looking at `Cargo.toml`, the `openssl` crate is at version `0.10`. Unfortunately, `EVP_BytesToKey` is not exposed in the Rust `openssl` crate bindings.
+
+The simplest compatible approach is to **drop the manual key derivation and PEM construction entirely**, and instead **invoke `openssl enc` as a subprocess** to perform the encryption. This guarantees that the output is always compatible with `openssl enc -d`, since it is literally produced by the same tool.
+
+The flow would be:
+1. Generate a random salt (8 bytes) as before
+2. Spawn `openssl enc -e -aes-128-cbc -pbkdf2 -iter <n> -pass stdin -S <hex-salt>`, piping the passphrase to stdin and the plaintext as input
+3. Capture the PEM output and return it as the string
+
+This means:
+- `derive_aes_key` and the manual `encrypt_to_pem` function can be removed entirely
+- `SymmetricKeyValue` no longer needs to derive an AES key — it just provides the passphrase
+- `EncryptionParams` only needs to store the salt (the IV is derived by OpenSSL internally)
+
+Would you like me to proceed with this approach? If so, please add `nix-crypto-core/src/openssl/decryptable.rs` to the chat so I can propose the full updated file.
+
+> Tokens: 40k sent, 284 received. Cost: $0.13 message, $1.15 session.  
+> Cargo.toml  
+> Add file to the chat? (Y)es/(N)o/(D)on't ask again [Yes]: n  
+
+#### I have updated the crate to openssl 0.10.76 which includes the "openssl::pkcs5::bytes_to_key" function. Can you now accomplish this withouth invoking openssl as a subprocess?  
+
+Yes! `bytes_to_key` is exactly what we need. It implements `EVP_BytesToKey` which is what `openssl enc` uses internally to derive the key and IV from the passphrase and salt.
+
+The updated approach in `decryptable.rs` would be:
+
+1. Remove `derive_aes_key` from `SymmetricKeyValue` — the passphrase (`random_secret`) is passed directly to `bytes_to_key`
+2. In `encrypt_to_pem`, call `openssl::pkcs5::bytes_to_key` with the cipher, digest (MD5, as `openssl enc` uses by default), passphrase, and salt to derive both the key and IV
+3. Use the derived key and IV to encrypt with `openssl::symm::encrypt`
+4. Construct the `Salted__` payload as before
+
+This means `EncryptionParams` only needs to store the **salt** — the IV no longer needs to be stored separately since it is deterministically derived from the passphrase and salt by `bytes_to_key`.
+
+Before I write the full implementation, could you add the following to the chat:
+
+1. `nix-crypto-core/src/openssl/decryptable.rs` — to make sure I'm working from the current version of the file
+
+> Tokens: 41k sent, 256 received. Cost: $0.13 message, $1.27 session.  
+
+#### /drop nix-crypto-core/src/openssl/decryptable.rs  
+> Removed nix-crypto-core/src/openssl/decryptable.rs from the chat  
+
+#### /add nix-crypto-core/src/openssl/decryptable.rs  
+> Added nix-crypto-core/src/openssl/decryptable.rs to the chat  
+
+#### I have added the file. Can you be more detailed with your implementation plan?  
+
+Here is the detailed implementation plan:
+
+**1. Update `EncryptionParams`**
+
+Remove the `iv` field — it no longer needs to be stored since `bytes_to_key` derives it deterministically from the passphrase and salt. `EncryptionParams` becomes:
+
+```rust
+pub struct EncryptionParams {
+    pub salt: Vec<u8>,
+}
+```
+
+Update `to_bytes` / `from_bytes` accordingly — they just store/read the salt bytes directly.
+
+**2. Remove `derive_aes_key` from `SymmetricKeyValue`**
+
+The method is no longer needed. The `random_secret` string is passed directly as the passphrase to `bytes_to_key`.
+
+**3. Update `encrypt_to_pem`**
+
+Replace the manual key derivation with a call to `openssl::pkcs5::bytes_to_key`:
+
+```rust
+let key_iv = openssl::pkcs5::bytes_to_key(
+    Cipher::aes_128_cbc(),
+    MessageDigest::md5(),       // openssl enc uses MD5 by default
+    random_secret.as_bytes(),   // passphrase
+    Some(salt),                 // salt
+    1,                          // iteration count (openssl enc default)
+)?;
+```
+
+This gives us both `key_iv.key` and `key_iv.iv` which are then passed to `encrypt`. Note that `openssl enc` uses **1 iteration and MD5** by default (not PBKDF2), so we must match that exactly.
+
+**4. Update `EncryptionParamsKey`**
+
+Since `EncryptionParams` no longer stores an IV, the `generate` method just needs to produce 8 random salt bytes.
+
+**5. Update the test in `test/openssl.nix`**
+
+Remove the `-pbkdf2` and `-iter` flags from the `openssl enc -d` command, since we are now using the default `EVP_BytesToKey` derivation:
+
+```bash
+openssl enc -d -aes-128-cbc \
+  -pass file:"$PASSPHRASE_FILE" \
+  -in "$ENCRYPTED_PEM_FILE" \
+  -out "$DECRYPTED_KEY_FILE"
+```
+
+**One question before implementing:** the `iterations` field on `IsOpensslSymmetricKeyIdentity` and `SymmetricKeyValue` was previously used for PBKDF2. Since we are now using `EVP_BytesToKey` with a fixed iteration count of 1, should we:
+
+- **Keep** the `iterations` field but ignore it in encryption (it is still used as part of the store key hash, so changing it would produce a different store key), or
+- **Remove** it entirely from the trait, struct, and all call sites?
+
+> Tokens: 40k sent, 555 received. Cost: $0.13 message, $1.40 session.  
+
+#### Is this secure as you now use one MD5 iteration?  
+
+No, it is not secure. Using MD5 with 1 iteration is the `openssl enc` default and is considered **cryptographically weak**:
+
+- **MD5** is a broken hash function, unsuitable for key derivation
+- **1 iteration** provides no resistance to brute-force attacks
+- `openssl enc` itself warns that this mode is insecure in recent versions
+
+The original PBKDF2-HMAC-SHA256 approach with 600,000 iterations was much stronger. The problem is that `openssl enc -d` with `-pbkdf2` expects the key to be derived **by openssl enc itself** from the passphrase, but our Rust code was deriving the key manually and passing it directly to AES — so the formats were incompatible.
+
+The correct fix is to use `-pbkdf2` in both directions. In `bytes_to_key` terms, this means we should **not** use `bytes_to_key` (which implements the legacy `EVP_BytesToKey`), but instead keep the PBKDF2 derivation in Rust and fix the **IV handling** to be compatible with `openssl enc -pbkdf2`.
+
+When `openssl enc -pbkdf2` is used, it derives **both the key and IV** from the passphrase using PBKDF2, concatenating them. Specifically it derives `key_len + iv_len` bytes total and splits them. For AES-128-CBC that is 16 + 16 = 32 bytes.
+
+Would you like me to implement this approach instead?
+
+> Tokens: 42k sent, 314 received. Cost: $0.13 message, $1.53 session.  
+
+#### So you are not going to fix anything then?  
+
+You're right, I apologize. Let me propose a concrete fix.
+
+The current `derive_aes_key` derives only the **key** (16 bytes) using PBKDF2, but the **IV** is generated randomly and stored separately. When `openssl enc -pbkdf2` decrypts, it derives **both key and IV together** (32 bytes total for AES-128-CBC: 16 for key + 16 for IV) from the passphrase using PBKDF2.
+
+The fix is:
+
+1. In `derive_aes_key`, derive **32 bytes** instead of 16, then split into key (first 16) and IV (last 16)
+2. Remove the `iv` field from `EncryptionParams` — the IV is now derived from the passphrase and salt, not stored
+3. In `encrypt_to_pem`, use the derived key and IV from step 1
+4. The `openssl enc -d -aes-128-cbc -pbkdf2 -iter 600000 -pass file:...` command in the test will then work correctly since it derives key+IV the same way
+
+This keeps PBKDF2-HMAC-SHA256 with 600,000 iterations and is fully compatible with `openssl enc -pbkdf2`.
+
+Shall I proceed with implementing this?
+
+> Tokens: 42k sent, 274 received. Cost: $0.13 message, $1.66 session.  
+
+#### /code Ok, proceed.  
+
+#### Ok, proceed.  
+
+Here are the changes needed:
+
+1. In `decryptable.rs`: derive 32 bytes with PBKDF2, split into key (first 16) and IV (last 16), remove `iv` from `EncryptionParams`
+2. In `test/openssl.nix`: update the `openssl enc -d` command to use `-aes-128-cbc -pbkdf2 -iter 600000`
+
+nix-crypto-core/src/openssl/decryptable.rs
+```
+use openssl::pkcs5::pbkdf2_hmac;
+use openssl::hash::MessageDigest;
+use openssl::symm::{encrypt, Cipher};
+use openssl::rand::rand_bytes;
+
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+
+use crate::error::Error;
+use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
+use crate::store::{IsCryptoStoreKey, StoreHasher};
+use crate::openssl::pkey;
+
+// ============================================================================
+// Decryptable trait
+// ============================================================================
+
+/// A `Decryptable` value can be represented as a byte vector for the purpose
+/// of encryption. This is the plaintext representation that will be encrypted,
+/// not the encrypted representation itself.
+pub trait Decryptable {
+    fn export(&self) -> Result<Vec<u8>, Error>;
+}
+
+impl Decryptable for pkey::Key {
+    fn export(&self) -> Result<Vec<u8>, Error> {
+        self.key_to_pem()
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Enum that lists all the key derivation schemes supported
+/// by Nix Crypto for exporting decryptable credentials.
+pub enum KeyDerivation {
+    PBKDF2 = 0
+}
+
+impl KeyDerivation {
+
+    pub fn from_string(value: &String) -> Result<KeyDerivation, Error> {
+        match value.to_lowercase().as_str() {
+            "pbkdf2" => Ok(KeyDerivation::PBKDF2),
+            _ => Error::fail_with(
+                format!("The given string '{}' is not a valid key derivation method.", value)
+            )
+        }
+    }
+
+    pub fn from_u8(value: u8) -> Result<KeyDerivation, Error> {
+
+        if value == (KeyDerivation::PBKDF2 as u8) {
+            Ok(KeyDerivation::PBKDF2)
+        }
+        else {
+            Error::fail_with(format!("Cannot convert '{}' into a KeyDerivation", value))
+        }
+    }
+}
+
+// ============================================================================
+// SymmetricKeyValue
+// ============================================================================
+
+/// The value stored in the `CryptoStore` for a symmetric key. Contains the
+/// randomly generated secret, the key derivation scheme, and the iteration
+/// count used for PBKDF2.
+pub struct SymmetricKeyValue {
+    pub random_secret: String,
+    pub key_derivation: KeyDerivation,
+    pub iterations: u32,
+}
+
+impl SymmetricKeyValue {
+    /// Serialize to bytes as `<key_derivation>:<iterations>:<random_secret>`.
+    fn to_bytes(&self) -> Vec<u8> {
+        format!("{}:{}:{}", (self.key_derivation as u8).clone(), self.iterations, self.random_secret)
+            .into_bytes()
+    }
+
+    /// Deserialize from bytes produced by `to_bytes`.
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let s = std::str::from_utf8(bytes)?;
+
+        // Split into at most 3 parts so the random_secret can itself contain ':'
+        let mut parts = s.splitn(3, ':');
+
+        let key_derivation_u8 = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing key_derivation in SymmetricKeyValue".to_string()))?
+            .to_string()
+            .parse::<u8>()
+            .map_err(|_| Error::from_message("Invalid key derivaiton for value.".to_string()))?;
+
+        let key_derivation = KeyDerivation::from_u8(key_derivation_u8)?;
+
+        let iterations_str = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing iterations in SymmetricKeyValue".to_string()))?;
+
+        let iterations = iterations_str
+            .parse::<u32>()
+            .map_err(|_| Error::from_message(format!("Invalid iterations value: {}", iterations_str)))?;
+
+        let random_secret = parts
+            .next()
+            .ok_or_else(|| Error::from_message("Missing random_secret in SymmetricKeyValue".to_string()))?
+            .to_string();
+
+        Ok(SymmetricKeyValue { random_secret, key_derivation, iterations })
+    }
+
+    /// Derive a key and IV from the passphrase and salt using PBKDF2-HMAC-SHA256.
+    ///
+    /// For AES-128-CBC, `openssl enc -pbkdf2` derives `key_len + iv_len` = 32 bytes
+    /// total from the passphrase, then splits them: first 16 bytes are the key,
+    /// last 16 bytes are the IV. We replicate that behaviour here so that the
+    /// output is compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
+    fn derive_key_and_iv(&self, salt: &[u8]) -> Result<(Vec<u8>, Vec<u8>), Error> {
+        match self.key_derivation {
+            KeyDerivation::PBKDF2 => {
+                let mut key_and_iv = vec![0u8; 32];
+                pbkdf2_hmac(
+                    self.random_secret.as_bytes(),
+                    salt,
+                    self.iterations as usize,
+                    MessageDigest::sha256(),
+                    &mut key_and_iv,
+                )?;
+                let key = key_and_iv[..16].to_vec();
+                let iv  = key_and_iv[16..].to_vec();
+                Ok((key, iv))
+            }
+        }
+    }
+}
+
+// ============================================================================
+// IsOpensslSymmetricKeyIdentity
+// ============================================================================
+
+/// Identifies an OpenSSL symmetric key. Implementors provide the key identity,
+/// derivation scheme, and PBKDF2 iteration count. The underlying
+/// `SymmetricKeyValue` (including the random secret) is derived and stored
+/// automatically.
+pub trait IsOpensslSymmetricKeyIdentity {
+    fn key_id(&self) -> &String;
+    fn key_derivation(&self) -> &String;
+    fn iterations(&self) -> u32;
+}
+
+/// A newtype wrapper around a reference to an arbitrary `IsOpensslSymmetricKeyIdentity`
+/// instance. The `IsCrytpoStoreKeyDerivable` trait for symmetric key identites
+/// is implemented through this type.
+struct SymmetricKeyIdentity<'a, T: IsOpensslSymmetricKeyIdentity>(pub &'a T);
+
+impl<'a, T : IsOpensslSymmetricKeyIdentity> IsCryptoStoreKey
+for SymmetricKeyIdentity<'a, T> {
+    type Value = SymmetricKeyValue;
+
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        let identity = self.0;
+        let iterations = identity.iterations();
+        hasher.update(identity.key_id().as_bytes());
+        hasher.update(identity.key_derivation().as_bytes());
+        hasher.update(&iterations.to_be_bytes());
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &SymmetricKeyValue) -> Result<Vec<u8>, Error> {
+        Ok(value.to_bytes())
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<SymmetricKeyValue, Error> {
+        SymmetricKeyValue::from_bytes(value)
+    }
+}
+
+impl<'a, T: IsOpensslSymmetricKeyIdentity> IsCryptoStoreKeyDerivable
+for SymmetricKeyIdentity<'a, T> {
+    fn derive(&self) -> Result<SymmetricKeyValue, Error> {
+        let mut random_bytes = vec![0u8; 16];
+        rand_bytes(&mut random_bytes)?;
+        let random_secret = STANDARD.encode(&random_bytes);
+
+        Ok(SymmetricKeyValue {
+            random_secret,
+            key_derivation: KeyDerivation::from_string(&self.0.key_derivation())?,
+            iterations: self.0.iterations(),
+        })
+    }
+}
+
+// ============================================================================
+// EncryptionParams
+// ============================================================================
+
+/// Stores the salt used to encrypt a specific `(symmetric_key, credential)`
+/// pair. By persisting this in the store we guarantee that calling
+/// `export_decryptable` with the same key, credential, and store always
+/// produces identical output.
+///
+/// The IV is not stored separately — it is derived deterministically from the
+/// passphrase and salt by PBKDF2, exactly as `openssl enc -pbkdf2` does.
+pub struct EncryptionParams {
+    pub salt: Vec<u8>,
+}
+
+impl EncryptionParams {
+    fn generate() -> Result<Self, Error> {
+        let mut salt = vec![0u8; 8];
+        rand_bytes(&mut salt)?;
+        Ok(EncryptionParams { salt })
+    }
+
+    /// Serialize as the raw salt bytes.
+    fn to_bytes(&self) -> Vec<u8> {
+        self.salt.clone()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.is_empty() {
+            return Err(Error::from_message("EncryptionParams bytes are empty".to_string()));
+        }
+        Ok(EncryptionParams { salt: bytes.to_vec() })
+    }
+}
+
+/// The store key for `EncryptionParams`. It is derived by hashing the raw
+/// store keys of both the symmetric key identity and the credential identity,
+/// making it unique per `(key, credential)` pair.
+struct EncryptionParamsKey<'a, TKey, TCred> {
+    symmetric_key_identity: &'a TKey,
+    credential_identity: &'a TCred,
+}
+
+impl<'a, TKey, TCred> EncryptionParamsKey<'a, TKey, TCred> {
+    pub fn new(symmetric_key_identity: &'a TKey, credential_identity: &'a TCred) -> Self {
+        EncryptionParamsKey { symmetric_key_identity, credential_identity }
+    }
+}
+
+impl<'a, TKey, TCred> IsCryptoStoreKey
+for EncryptionParamsKey<'a, TKey, TCred>
+where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
+    type Value = EncryptionParams;
+
+    fn to_store_key_raw(&self, mut hasher: StoreHasher) -> Vec<u8> {
+        hasher.update(b"encryption_params");
+        hasher.update_with_identity(self.symmetric_key_identity);
+        hasher.update_with_identity(self.credential_identity);
+        Vec::from(hasher.finish())
+    }
+
+    fn to_store_value_raw(value: &EncryptionParams) -> Result<Vec<u8>, Error> {
+        Ok(value.to_bytes())
+    }
+
+    fn from_store_value_raw(value: &Vec<u8>) -> Result<EncryptionParams, Error> {
+        EncryptionParams::from_bytes(value)
+    }
+}
+
+impl<'a, TKey, TCred> IsCryptoStoreKeyDerivable for EncryptionParamsKey<'a, TKey, TCred>
+where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
+    fn derive(&self) -> Result<EncryptionParams, Error> {
+        EncryptionParams::generate()
+    }
+}
+
+// ============================================================================
+// Encryption helpers
+// ============================================================================
+
+const PEM_HEADER: &str = "-----BEGIN ENCRYPTED DATA-----";
+const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
+
+/// Encrypt `plaintext` with AES-128-CBC and return a PEM-encoded string
+/// compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
+///
+/// The key and IV are derived from the passphrase and salt using
+/// PBKDF2-HMAC-SHA256, deriving 32 bytes total and splitting them into
+/// a 16-byte key and a 16-byte IV — exactly as `openssl enc -pbkdf2` does.
+///
+/// The payload layout matches the OpenSSL `enc` format:
+///   `Salted__` (8 bytes) | salt (8 bytes) | ciphertext
+/// The whole payload is Base64-encoded and wrapped in a PEM envelope.
+fn encrypt_to_pem(
+    key: &SymmetricKeyValue,
+    salt: &[u8],
+    plaintext: &Vec<u8>
+) -> Result<String, Error> {
+    let (aes_key, iv) = key.derive_key_and_iv(salt)?;
+    let cipher = Cipher::aes_128_cbc();
+    let ciphertext = encrypt(cipher, &aes_key, Some(&iv), plaintext)?;
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(b"Salted__");
+    payload.extend_from_slice(salt);
+    payload.extend_from_slice(&ciphertext);
+
+    let b64 = STANDARD.encode(&payload);
+
+    // Wrap Base64 at 64 characters per line, as is standard for PEM
+    let pem_body = b64
+        .as_bytes()
+        .chunks(64)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(format!("{}\n{}\n{}", PEM_HEADER, pem_body, PEM_FOOTER))
+}
+
+// ============================================================================
+// export_decryptable
+// ============================================================================
+
+/// Export a credential encrypted with a symmetric key, returning a
+/// PEM-formatted string containing the AES-128-CBC encrypted credential,
+/// compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
+///
+/// Calling this function multiple times with the same `key`, `credential`,
+/// and store will always produce identical output, because the salt is
+/// stored in the `CryptoStore` on the first call and reused thereafter.
+pub fn export_decryptable<K, C>(
+    crypto_nix: &CryptoNix,
+    key: &K,
+    credential: &C,
+) -> Result<String, Error>
+where
+    K: IsOpensslSymmetricKeyIdentity,
+    C: IsCryptoStoreKeyDerivable,
+    C::Value: Decryptable,
+{
+    // Step 1: Wrap the key in a SymmetricKeyIdentity and get or derive the
+    // symmetric key value (random_secret, derivation, iterations).
+    let symmetric_identity = SymmetricKeyIdentity(key);
+    let symmetric_key_value = crypto_nix.get_or_derive(&symmetric_identity)?;
+
+    // Step 2: Get or derive the credential value.
+    let credential_value = crypto_nix.get_or_derive(credential)?;
+
+    // Step 3: Get or derive the encryption params (salt) for this
+    // (key, credential) pair. Using a unique salt per pair ensures that
+    // encrypting the same credential with different keys produces different
+    // ciphertext, preventing IV reuse.
+    let encryption_params_key = EncryptionParamsKey::new(&symmetric_identity, credential);
+    let encryption_params = crypto_nix.get_or_derive(&encryption_params_key)?;
+
+    // Step 4: Export the credential to plaintext bytes.
+    let plaintext = credential_value.export()?;
+
+    // Step 5: Encrypt and return as PEM.
+    encrypt_to_pem(
+        &symmetric_key_value,
+        &encryption_params.salt,
+        &plaintext
+    )
+}
+
+// ============================================================================
+// get_symmetric_key_passphrase
+// ============================================================================
+
+/// Retrieve (or derive and store) the random passphrase for the symmetric key
+/// identified by `key`. Returns the `random_secret` string which is the
+/// passphrase used as input to the key derivation function.
+///
+/// Calling this function multiple times with the same `key` and store will
+/// always return the same passphrase, because the `SymmetricKeyValue` is
+/// stored on the first call and reused thereafter.
+pub fn get_symmetric_key_passphrase<K: IsOpensslSymmetricKeyIdentity>(
+    crypto_nix: &CryptoNix,
+    key: &K,
+) -> Result<String, Error> {
+    let symmetric_identity = SymmetricKeyIdentity(key);
+    let value = crypto_nix.get_or_derive(&symmetric_identity)?;
+    Ok(value.random_secret)
+}
+```
+
+And update the test to use `-aes-128-cbc -pbkdf2` with the correct iteration count:
+
+test/openssl.nix
+```
+/**
+  Test suite for OpenSSL functionality.
+
+  Accepts the following arguments:
+  - `pkgs`: the nixpkgs package set.
+  - `nix-crypto-service`: path to the `nix-crypto-service` binary.
+*/
+{ pkgs, nix-crypto-service, ... }:
+let
+  crypto = pkgs.callPackage ../crypto/default.nix {};
+  inherit (crypto) openssl;
+
+  # Generates an RSA key or returns the existing one from the store.
+  # The private key itself is not returned — only operations that can
+  # be performed with it.
+  pk-rsa = openssl.private-key { 
+    attrs = {
+      vault = "openssl";
+      name = "openssl-test-key";
+    };
+    type = "rsa";
+  };
+
+  # Symmetric key parameters used to encrypt the private key.
+  # The same parameters must be passed to nix-crypto-service when
+  # retrieving the passphrase.
+  symmetric-key-params = {
+    key-id = "openssl-test-symmetric-key";
+    key-derivation = "pbkdf2";
+    iterations = 600000;
+  };
+
+  # The encrypted PEM string produced by the nix-crypto plugin.
+  # This is evaluated at nix evaluation time and interpolated into
+  # the bash script below.
+  encrypted-pem = pk-rsa.export-decryptable-pkey symmetric-key-params;
+in
+  {
+    # Asserts that the plugin can generate or retrieve a public key in PEM format.
+    "It can generate a public/private key set" = { _assert, ... }:
+      _assert.is-string pk-rsa.public-key-pem
+    ;
+
+    # Asserts that the plugin can build a self-signed X.509 certificate
+    # signed by the RSA key.
+    "It can generate a x509 self-signed certificate" = { _assert, ... }:
+    let
+      x509 = pk-rsa.x509 {
+        subject-name = { CN = "subject"; };
+        issuer-name = { CN = "issuer"; };
+        serial = 1;
+        start-date = "2026-01-09T21:29:36Z";
+        expiry-date = "2036-01-09T21:29:36Z";
+      };
+    in
+      # Derivation which outputs the public certificate of the CA
+      # safe to write into the nix store.
+      _assert.strings.has-prefix "-----BEGIN CERTIFICATE-----" x509.certificate-pem
+    ;
+
+    /**
+      Asserts that a private key stored by the nix-crypto plugin can be exported
+      using `nix-crypto-service export secret`, and that the public key derived
+      from the exported private key matches the public key computed by the plugin.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store used
+      by the nix-crypto plugin so that `nix-crypto-service` can locate the key.
+    */
+    "It can export the private key" = { _assert, ... }:
+    let
+      # The public key pem as computed by the nix plugin
+      expected-public-key-pem = pk-rsa.public-key-pem;
+      # The identity of the key, used to locate it in the store
+      key-identity = pk-rsa.identity;
+    in
+      _assert.bash-script
+      ''
+        PRIVATE_KEY_FILE=$(mktemp)
+        EXPECTED_PUBLIC_KEY_FILE=$(mktemp)
+        RANDOM_FILE=$(mktemp)
+        SIGNATURE_FILE=$(mktemp)
+
+        # Write the expected public key pem to a temp file
+        cat > "$EXPECTED_PUBLIC_KEY_FILE" << 'EOF'
+        ${expected-public-key-pem}
+        EOF
+
+        # Export the private key using nix-crypto-service
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-pkey \
+          --openssl-pkey-type rsa \
+          --openssl-pkey-id "${key-identity}" \
+          --output-file "$PRIVATE_KEY_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the exported private key
+        openssl dgst -sha256 -sign "$PRIVATE_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"
+
+        # Verify the signature using the expected public key
+        if ! openssl dgst -sha256 -verify "$EXPECTED_PUBLIC_KEY_FILE" -signature "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+        exit 0
+      ''
+    ;
+
+    /**
+      Asserts that a private key stored by the nix-crypto plugin can be exported
+      in encrypted form using `export-decryptable-pkey`, that the passphrase used
+      to encrypt it can be retrieved using `nix-crypto-service export secret` with
+      `--identity-type openssl-symmetric-key`, and that the decrypted key can be
+      used to sign data.
+
+      The encryption is AES-128-CBC with PBKDF2-HMAC-SHA256 key derivation,
+      compatible with `openssl enc -aes-128-cbc -pbkdf2`.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store
+      used by the nix-crypto plugin so that `nix-crypto-service` can locate the
+      symmetric key.
+    */
+    "It can export decryptable key" = { _assert, ... }:
+      _assert.bash-script
+      ''
+        ENCRYPTED_PEM_FILE=$(mktemp)
+        PASSPHRASE_FILE=$(mktemp)
+        DECRYPTED_KEY_FILE=$(mktemp)
+        RANDOM_FILE=$(mktemp)
+        SIGNATURE_FILE=$(mktemp)
+
+        # Write the encrypted PEM (produced at nix evaluation time) to a temp file
+        cat > "$ENCRYPTED_PEM_FILE" << 'EOF'
+        ${encrypted-pem}
+        EOF
+
+        # Retrieve the passphrase used to encrypt the private key
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-symmetric-key \
+          --openssl-symmetric-key-id "${symmetric-key-params.key-id}" \
+          --openssl-symmetric-key-derivation "${symmetric-key-params.key-derivation}" \
+          --openssl-symmetric-key-iterations "${toString symmetric-key-params.iterations}" \
+          --output-file "$PASSPHRASE_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        # Decrypt the encrypted PEM using the passphrase.
+        # The key and IV are derived from the passphrase and salt using
+        # PBKDF2-HMAC-SHA256, matching the derivation done in decryptable.rs.
+        openssl enc -d -aes-128-cbc -pbkdf2 \
+          -iter ${toString symmetric-key-params.iterations} \
+          -pass file:"$PASSPHRASE_FILE" \
+          -in "$ENCRYPTED_PEM_FILE" \
+          -out "$DECRYPTED_KEY_FILE"
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the decrypted private key
+        if ! openssl dgst -sha256 -sign "$DECRYPTED_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+        exit 0
+      ''
+    ;
+  }
+```
+
+> Tokens: 43k sent, 5.0k received. Cost: $0.20 message, $1.86 session.  
+> Committing nix-crypto-core/src/openssl/decryptable.rs before applying edits.  
+> Committing test/openssl.nix before applying edits.  
+> Commit fa0c0aa fix: correct PBKDF2 key size from 32 to 16 bytes for AES-128-CBC  
+> Applied edit to test/openssl.nix  
+> Applied edit to nix-crypto-core/src/openssl/decryptable.rs  
+> Commit e1b1da5 fix: derive key and IV together via PBKDF2 for openssl enc compatibility  

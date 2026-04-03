@@ -272,9 +272,6 @@ where TKey : IsCryptoStoreKey, TCred : IsCryptoStoreKey {
 // Encryption helpers
 // ============================================================================
 
-const PEM_HEADER: &str = "-----BEGIN ENCRYPTED DATA-----";
-const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
-
 /// Encrypt `plaintext` with AES-128-CBC and return a PEM-encoded string
 /// compatible with `openssl enc -d -aes-128-cbc -pbkdf2`.
 ///
@@ -287,7 +284,7 @@ const PEM_FOOTER: &str = "-----END ENCRYPTED DATA-----";
 /// The whole payload is Base64-encoded and wrapped in a PEM envelope.
 fn encrypt_to_pem(
     key: &SymmetricKeyValue,
-    salt: &[u8],
+    salt: &Vec<u8>,
     plaintext: &Vec<u8>
 ) -> Result<String, Error> {
     let (aes_key, iv) = key.derive_key_and_iv(salt)?;
@@ -309,7 +306,7 @@ fn encrypt_to_pem(
         .collect::<Vec<_>>()
         .join("\n");
 
-    Ok(format!("{}\n{}\n{}", PEM_HEADER, pem_body, PEM_FOOTER))
+    Ok(pem_body)
 }
 
 // ============================================================================

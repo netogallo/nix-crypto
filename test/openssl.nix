@@ -151,7 +151,7 @@ in
         # Decrypt the encrypted PEM using the passphrase.
         # The key and IV are derived from the passphrase and salt using
         # PBKDF2-HMAC-SHA256, matching the derivation done in decryptable.rs.
-        openssl enc -d -aes-128-cbc -pbkdf2 \
+        openssl enc -p -d -base64 -aes-128-cbc -pbkdf2 \
           -iter ${toString symmetric-key-params.iterations} \
           -pass file:"$PASSPHRASE_FILE" \
           -in "$ENCRYPTED_PEM_FILE" \

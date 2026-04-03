@@ -1,1 +1,1 @@
-aider --llm-history-file journal/0001-openssl-symmetric-key/session-contexts/decryptable-tests.llm.history --chat-history-file journal/0001-openssl-symmetric-key/session-contexts/decryptable-tests.md
+aider --llm-history-file journal/0001-openssl-symmetric-key/session-contexts/decryptable-tests.llm.history --chat-history-file journal/0001-openssl-symmetric-key/session-contexts/decryptable-tests.md "$@"
