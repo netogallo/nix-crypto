@@ -58,7 +58,17 @@ let
     on the first call and reused thereafter.
   */
   export-decryptable-pkey = { key-ref, symmetric-key-params }:
-    openssl.export-decryptable-pkey symmetric-key-params key-ref
+  let
+    key-id = to-key-identity symmetric-key-params.attrs;
+    params = {
+      inherit key-id;
+      inherit (symmetric-key-params) key-derivation iterations;
+    };
+  in
+    {
+      inherit key-id;
+      ciphertext-base64 = openssl.export-decryptable-pkey params key-ref;
+    }
   ;
 
   /**

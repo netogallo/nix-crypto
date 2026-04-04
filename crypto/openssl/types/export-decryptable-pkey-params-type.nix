@@ -1,17 +1,10 @@
-{ lib }:
+{ lib, types-common, }:
 let
   inherit (lib) types;
 in
   types.submodule {
     options = {
-      key-id = lib.mkOption {
-        type = types.str;
-        description = ''
-          A unique identifier for the symmetric key. This is used to
-          reference the key in the store. The same key-id will always
-          refer to the same symmetric key within a given store.
-        '';
-      };
+      attrs = types-common.attrs-type;
 
       key-derivation = lib.mkOption {
         type = types.enum [ "pbkdf2" ];

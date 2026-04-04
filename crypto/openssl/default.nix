@@ -7,9 +7,10 @@ let
     {
       inherit prelude;
       main = self.callPackage ./main.nix {};
-      x509-params-type = load-type ./x509-params-type.nix;
-      private-key-spec-type = load-type ./private-key-spec-type.nix;
-      export-decryptable-pkey-params-type = load-type ./export-decryptable-pkey-params-type.nix;
+      types-common = self.callPackage ./types/common.nix {};
+      x509-params-type = load-type ./types/x509-params-type.nix;
+      private-key-spec-type = load-type ./types/private-key-spec-type.nix;
+      export-decryptable-pkey-params-type = load-type ./types/export-decryptable-pkey-params-type.nix;
     }
   );
 in

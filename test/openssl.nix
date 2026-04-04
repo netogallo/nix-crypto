@@ -25,15 +25,14 @@ let
   # The same parameters must be passed to nix-crypto-service when
   # retrieving the passphrase.
   symmetric-key-params = {
-    key-id = "openssl-test-symmetric-key";
+    attrs = { key-id = "openssl-test-symmetric-key"; };
     key-derivation = "pbkdf2";
     iterations = 600000;
   };
 
-  # The encrypted PEM string produced by the nix-crypto plugin.
-  # This is evaluated at nix evaluation time and interpolated into
-  # the bash script below.
-  encrypted-pem = pk-rsa.export-decryptable-pkey symmetric-key-params;
+  # This contains the private key encrypted using a symmetric
+  # key derived from the `symmetric-key-params`
+  encrypted-pk-rsa = pk-rsa.export-decryptable-pkey symmetric-key-params;
 in
   {
     # Asserts that the plugin can generate or retrieve a public key in PEM format.
@@ -134,14 +133,14 @@ in
 
         # Write the encrypted PEM (produced at nix evaluation time) to a temp file
         cat > "$ENCRYPTED_PEM_FILE" << 'EOF'
-        ${encrypted-pem}
+        ${encrypted-pk-rsa.ciphertext-base64}
         EOF
 
         # Retrieve the passphrase used to encrypt the private key
         "${nix-crypto-service}" export secret \
           --sled-store "$NIX_CRYPTO_STORE" \
           --identity-type openssl-symmetric-key \
-          --openssl-symmetric-key-id "${symmetric-key-params.key-id}" \
+          --openssl-symmetric-key-id "${encrypted-pk-rsa.key-id}" \
           --openssl-symmetric-key-derivation "${symmetric-key-params.key-derivation}" \
           --openssl-symmetric-key-iterations "${toString symmetric-key-params.iterations}" \
           --output-file "$PASSPHRASE_FILE" \
