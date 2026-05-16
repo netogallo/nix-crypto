@@ -7,3 +7,5 @@ edition = "2024"
 docopt = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 nix_crypto_core = { path = "../nix-crypto-core" }
+tokio = "1.52.0"
+tokio-util = "0.7.18"
