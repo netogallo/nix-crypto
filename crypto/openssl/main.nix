@@ -58,19 +58,6 @@ let
     }
   ;
 
-  export-encrypted-pkey-pkey = { key-ref, key-identity, key-type }:
-  let
-    credential =
-      openssl.export-encrypted-pkey-pkey
-      key-ref
-      { inherit key-identity key-type; }
-    ;
-  in
-    {
-      inherit credential;
-    }
-  ;
-
   /**
     Retrieve or generate an OpenSSL private key.
     Accepts a `key-spec` with:
