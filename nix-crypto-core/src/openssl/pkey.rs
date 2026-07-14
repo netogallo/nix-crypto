@@ -5,6 +5,7 @@ use openssl::rsa;
 use crate::error::{Error};
 use crate::foundations::{IsCryptoStoreKeyDerivable};
 use crate::store::{IsCryptoStoreKey, StoreHasher};
+use crate::support::{Exportable};
 
 #[repr(u8)]
 pub enum Type {
@@ -95,6 +96,12 @@ impl Key {
         let pem = self.pkey.public_key_to_pem()?;
         let result = PKey::public_key_from_pem(&pem)?;
         Ok(result)
+    }
+}
+
+impl Exportable for Key {
+    fn export(&self) -> Result<Vec<u8>, Error> {
+        self.key_to_pem()
     }
 }
 

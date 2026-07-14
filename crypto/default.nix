@@ -1,7 +1,7 @@
 # This is a high level library built around the nix-crypto primitives. It is
 # recommended that this library is used instead of directly relying on the
 # primitives found in 'builtins.crypto'
-{ pkgs, ... }:
+{ pkgs, nix-crypto-version, ... }:
 let
   inherit (pkgs) lib;
   crypto = lib.makeScope pkgs.newScope (self:
@@ -11,6 +11,7 @@ let
       {
         prelude = self.callPackage ./prelude.nix {};
         openssl = self.callPackage ./openssl/default.nix {};
+        inherit nix-crypto-version;
       }
   );
 in

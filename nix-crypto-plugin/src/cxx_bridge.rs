@@ -5,6 +5,7 @@
 // implementations for the functions in this module should be placed
 // in cxx_api
 use crate::cxx_api::*;
+use crate::cxx_api::data::{CxxNixAttrs};
 
 #[cxx::bridge]
 pub mod ffi {
@@ -104,6 +105,7 @@ pub mod ffi {
 
     extern "Rust" {
 
+        type CxxNixAttrs<'a>;
         type CxxNixCrypto;
         type CxxOpensslPrivateKey;
         type CxxOpensslX509Certificate;
@@ -117,12 +119,23 @@ pub mod ffi {
 
         fn cxx_export_decryptable_openssl_pkey(self: &CxxNixCrypto, symmetric_key: OpensslSymmetricKeyIdentity, credential: OpensslPrivateKeyIdentity) -> Result<String>;
 
+        unsafe fn cxx_export_encrypted_openssl_pkey_pkey<'a>(self: &CxxNixCrypto, key: OpensslPrivateKeyIdentity, credential: OpensslPrivateKeyIdentity) -> Result<Box<CxxNixAttrs<'a>>>;
+
         fn public_pem(self: &CxxOpensslPrivateKey) -> Result<String>;
 
         fn public_pem(self: &CxxOpensslX509Certificate) -> Result<String>;
+
+        unsafe fn get_keys<'a>(self: &'a CxxNixAttrs<'a>) -> Vec<String>;
+
+        unsafe fn try_get_int<'a>(self: &'a CxxNixAttrs<'a>, key: &str) -> Vec<i64>;
+
+        unsafe fn try_get_str<'a>(self: &'a CxxNixAttrs<'a>, key: &str) -> Vec<String>;
+
+        unsafe fn try_get_attrs<'a>(self: &'a CxxNixAttrs<'a>, key: &'a str) -> Vec<CxxNixAttrs<'a>>;
     }
 
     unsafe extern "C++" {
+
         include!("nix_crypto_plugin/include/nix_crypto.hh");
 
         fn init_primops();

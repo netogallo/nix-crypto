@@ -15,12 +15,26 @@ pub enum Error {
     FromUtf8Error(string::FromUtf8Error),
     SledError(sled::Error),
     CryptoNixError(String),
-    TimeParseError(time::error::Parse)
+    CryptoNixErrorRef(&'static str),
+    TimeParseError(time::error::Parse),
+
+    /// Used to indicate an error occured when
+    /// serializing or deserializing json-encoded
+    /// binary data via serde. The `serde_json::Error`
+    /// type does not implement `Clone`, therefore we
+    /// save the error as `String`.
+    SerdeJsonError(String)
 }
 
 impl From<time::error::Parse> for Error {
     fn from(e: time::error::Parse) -> Error {
         Error::TimeParseError(e)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        Error::SerdeJsonError(format!("{e:#?}"))
     }
 }
 
@@ -57,8 +71,21 @@ impl fmt::Display for Error {
             Error::Utf8Error(msg) => msg.fmt(f),
             Error::FromUtf8Error(msg) => msg.fmt(f),
             Error::CryptoNixError(msg) => msg.fmt(f),
+            Error::CryptoNixErrorRef(msg) => msg.fmt(f),
             _ => write!(f, "Unknown error in the 'nix-crypto' Rust code.")
         }
+    }
+}
+
+impl From<&'static str> for Error {
+    fn from(msg: &'static str) -> Error {
+        Error::CryptoNixErrorRef(msg)
+    }
+}
+
+impl From<String> for Error {
+    fn from(msg: String) -> Error {
+        Error::CryptoNixError(msg)
     }
 }
 

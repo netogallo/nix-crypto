@@ -6,7 +6,10 @@ use openssl::x509::extension::{AuthorityKeyIdentifier, SubjectKeyIdentifier};
 
 use crate::error::{Error};
 use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
+use crate::support::{Exportable};
 
+pub mod envelope;
+pub mod export;
 pub mod pkey;
 pub mod decryptable;
 
@@ -271,7 +274,7 @@ impl CryptoNix {
     where
         K: decryptable::IsOpensslSymmetricKeyIdentity,
         C: IsCryptoStoreKeyDerivable,
-        C::Value: decryptable::Decryptable,
+        C::Value: Exportable,
     {
         decryptable::export_decryptable(self, key, credential)
     }
@@ -288,5 +291,23 @@ impl CryptoNix {
         key: &K,
     ) -> Result<String, Error> {
         decryptable::get_symmetric_key_passphrase(self, key)
+    }
+
+    
+    /// This function allows exporting private store credentials in an
+    /// encrypted form. This allows safely writing the encrypted credentials
+    /// to the nix store which can be decrypted by a system which controls
+    /// the key used for the encryption.
+    pub fn export_encrypted<K, C>(
+        &self,
+        key: &K,
+        credential: &C,
+    ) -> Result<export::AsymmetricEncryptionResult, Error>
+    where
+        K: pkey::IsOpensslPrivateKeyIdentity,
+        C: IsCryptoStoreKeyDerivable,
+        C::Value: Exportable,
+    {
+        export::export_encrypted(self, key, credential)
     }
 }

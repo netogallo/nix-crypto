@@ -14,6 +14,7 @@ struct OpensslSymmetricKeyIdentity;
 struct X509BuildParams;
 struct CxxNixCrypto;
 struct CryptoNixPrimops;
+struct CxxNixAttrs;
 
 struct ExtraBuiltinsSettings : nix::Config {
   nix::Setting<std::string> extraCryptoNixArgs{
@@ -33,6 +34,11 @@ class CryptoNixPrimops {
   std::string opensslX509Pem(X509BuildParams&& buildParams);
   std::string opensslExportDecryptableOpensslPkey(
     OpensslSymmetricKeyIdentity&& symmetric_key,
+    OpensslPrivateKeyIdentity&& credential
+  );
+
+  rust::Box<CxxNixAttrs> opensslExportEncryptedPkeyPkey(
+    OpensslPrivateKeyIdentity&& pkey,
     OpensslPrivateKeyIdentity&& credential
   );
 

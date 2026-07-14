@@ -1,0 +1,3 @@
+The openssl_primops.cc/openssl_primos.hh files define a C++ function called `primop_openssl_export_encrypted_pkey_pkey` which gets added as a nix builtins when the nix-crypto plugin is loaded. The function gets exposed with the name `export-encrypted-pkey-pkey` inside the `openssl` builtin attribute set.
+
+A function must be added to the nix library. Specifically, the `private-key` defined in the file 'crypto/openssl/main.nix' should be extended with the ability to call this function accepting a `private-key-spec-type` as argument. Look at the implementation of the `export-decryptable-pkey` function as the `export-encrypted-pkey-pkey` should work in a similar way.

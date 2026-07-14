@@ -362,9 +362,24 @@ static void primop_openssl_export_decryptable_pkey(EvalState& state, const PosId
     }
 }
 
-constexpr const int OPENSSL_PRIMOPS_COUNT = 3;
+static void primop_openssl_export_encrypted_pkey_pkey(EvalState& state, const PosIdx pos, Value** args, Value& result) {
+    try {
+        auto pem = primops->opensslExportEncryptedPkeyPkey(
+            openssl_get_private_key_identity(state, pos, *args[0]),
+            openssl_get_private_key_identity(state, pos, *args[1])
+        );
+        toNixAttrs(state, pos, *pem, result);
+    } catch(rust::Error& e) {
+        state.error<EvalError>(e.what())
+            .atPos(pos)
+            .debugThrow();
+    }
+}
+
+constexpr const int OPENSSL_PRIMOPS_COUNT = 4;
 constexpr const char* K_X509_PEM = "x509-pem";
 constexpr const char* K_EXPORT_DECRYPTABLE_PKEY = "export-decryptable-pkey";
+constexpr const char* K_EXPORT_ENCRYPTED_PKEY_PKEY = "export-encrypted-pkey-pkey";
 
 void primop_openssl(EvalState& state, const PosIdx, Value**, Value& result) {
 
@@ -397,6 +412,16 @@ void primop_openssl(EvalState& state, const PosIdx, Value**, Value& result) {
         .arity = 2,
         .doc = {},
         .fun = primop_openssl_export_decryptable_pkey,
+        .experimentalFeature = {},
+    });
+
+    auto opensslExportEncryptedPkey = state.symbols.create(K_EXPORT_ENCRYPTED_PKEY_PKEY);
+    attrs.alloc(opensslExportEncryptedPkey).mkPrimOp(new PrimOp {
+        .name = K_EXPORT_ENCRYPTED_PKEY_PKEY,
+        .args = {},
+        .arity = 2,
+        .doc = {},
+        .fun = primop_openssl_export_encrypted_pkey_pkey,
         .experimentalFeature = {},
     });
 

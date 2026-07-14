@@ -9,24 +9,7 @@ use base64::Engine;
 use crate::error::Error;
 use crate::foundations::{CryptoNix, IsCryptoStoreKeyDerivable};
 use crate::store::{IsCryptoStoreKey, StoreHasher};
-use crate::openssl::pkey;
-
-// ============================================================================
-// Decryptable trait
-// ============================================================================
-
-/// A `Decryptable` value can be represented as a byte vector for the purpose
-/// of encryption. This is the plaintext representation that will be encrypted,
-/// not the encrypted representation itself.
-pub trait Decryptable {
-    fn export(&self) -> Result<Vec<u8>, Error>;
-}
-
-impl Decryptable for pkey::Key {
-    fn export(&self) -> Result<Vec<u8>, Error> {
-        self.key_to_pem()
-    }
-}
+use crate::support::{Exportable};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,7 +311,7 @@ pub fn export_decryptable<K, C>(
 where
     K: IsOpensslSymmetricKeyIdentity,
     C: IsCryptoStoreKeyDerivable,
-    C::Value: Decryptable,
+    C::Value: Exportable,
 {
     // Step 1: Wrap the key in a SymmetricKeyIdentity and get or derive the
     // symmetric key value (random_secret, derivation, iterations).

@@ -7,13 +7,14 @@
 */
 { pkgs, nix-crypto-service, ... }:
 let
-  crypto = pkgs.callPackage ../crypto/default.nix {};
+  #crypto = pkgs.callPackage ../crypto/default.nix {};
+  inherit (pkgs.tikal) crypto;
   inherit (crypto) openssl;
 
   # Generates an RSA key or returns the existing one from the store.
   # The private key itself is not returned — only operations that can
   # be performed with it.
-  pk-rsa = openssl.private-key { 
+  pk-rsa = openssl.private-key {
     attrs = {
       vault = "openssl";
       name = "openssl-test-key";
@@ -33,6 +34,18 @@ let
   # This contains the private key encrypted using a symmetric
   # key derived from the `symmetric-key-params`
   encrypted-pk-rsa = pk-rsa.export-decryptable-pkey symmetric-key-params;
+
+  # A second private key to test encryption with export-encrypted-pkey-pkey
+  credential-key = openssl.private-key {
+    attrs = {
+      vault = "openssl";
+      name = "credential-test-key";
+    };
+    type = "rsa";
+  };
+
+  # Encrypt the credential-key using pk-rsa
+  encrypted-credential = pk-rsa.export-encrypted-pkey-pkey credential-key.key-spec;
 in
   {
     # Asserts that the plugin can generate or retrieve a public key in PEM format.
@@ -161,6 +174,64 @@ in
 
         # Sign the random value using the decrypted private key
         if ! openssl dgst -sha256 -sign "$DECRYPTED_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+        exit 0
+      ''
+    ;
+
+    /**
+      Asserts that a private key can be encrypted with another private key using
+      `export-encrypted-pkey-pkey`, and that the encrypted payload can be decrypted
+      using the exported private key.
+
+      The `NIX_CRYPTO_STORE` environment variable must point to the same sled store
+      used by the nix-crypto plugin so that `nix-crypto-service` can locate the keys.
+    */
+    "It can export and decrypt a private key encrypted with another private key" = { _assert, ... }:
+    let
+      # The identity of the key used for encryption, to locate it in the store
+      key-identity = pk-rsa.identity;
+      # The expected public key of the credential-key, to verify decryption
+      expected-public-key-pem = credential-key.public-key-pem;
+    in
+      _assert.bash-script
+      ''
+        WORKDIR=$(mktemp -d)
+        echo "The WD: $WORKDIR"
+        PRIVATE_KEY_FILE="$WORKDIR/private_key_file"
+        EXPECTED_PUBLIC_KEY_FILE="$WORKDIR/expected_public_key_file"
+        DECRYPTED_KEY_FILE="$WORKDIR/decrypted_key_file"
+        RANDOM_FILE="$WORKDIR/random_file"
+        SIGNATURE_FILE="$WORKDIR/signature_file"
+
+        # Write the expected public key pem to a temp file
+        cat > "$EXPECTED_PUBLIC_KEY_FILE" << 'EOF'
+        ${expected-public-key-pem}
+        EOF
+
+        # Export the pk-rsa private key using nix-crypto-service
+        "${nix-crypto-service}" export secret \
+          --sled-store "$NIX_CRYPTO_STORE" \
+          --identity-type openssl-pkey \
+          --openssl-pkey-type rsa \
+          --openssl-pkey-id "${key-identity}" \
+          --output-file "$PRIVATE_KEY_FILE" \
+          --log-file "$NIX_CRYPTO_LOG" \
+          --log-level debug
+
+        ${encrypted-credential.decrypt} --key "$PRIVATE_KEY_FILE" --out-file "$DECRYPTED_KEY_FILE" --skip-cleanup --verbose
+
+        # Generate a random value to sign
+        dd if=/dev/urandom of="$RANDOM_FILE" bs=32 count=1 2>/dev/null
+
+        # Sign the random value using the decrypted private key
+        if ! openssl dgst -sha256 -sign "$DECRYPTED_KEY_FILE" -out "$SIGNATURE_FILE" "$RANDOM_FILE"; then
+          exit 1
+        fi
+
+        # Verify the signature using the expected public key
+        if ! openssl dgst -sha256 -verify "$EXPECTED_PUBLIC_KEY_FILE" -signature "$SIGNATURE_FILE" "$RANDOM_FILE"; then
           exit 1
         fi
         exit 0

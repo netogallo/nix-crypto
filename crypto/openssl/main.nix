@@ -1,35 +1,22 @@
 /**
   OpenSSL cryptographic operations for nix-crypto.
 */
-{ pkgs, prelude, private-key-spec-type, x509-params-type, export-decryptable-pkey-params-type, ... }@module:
+{
+  pkgs,
+  prelude,
+  common,
+  private-key-spec-type,
+  x509-params-type,
+  export-decryptable-pkey-params-type,
+  callPackage,
+  ...
+}@module:
 let
+  inherit (common) to-key-identity;
   inherit (pkgs) lib;
   inherit (lib) types;
   inherit (builtins.crypto) openssl;
   type-checker = prelude.type-checker { };
-
-  /**
-    Produces a deterministic key identity string from an attribute set.
-    Keys are sorted alphabetically and joined as `key=value` pairs separated
-    by `&`. For example, `{ vault = "openssl"; name = "my-key"; }` produces
-    `"name=my-key&vault=openssl"`.
-
-    This string is used by both the nix-crypto plugin (to store the key) and
-    `nix-crypto-service` (to look it up). The sort order ensures the identity
-    is stable regardless of the order in which `attrs` is defined in nix.
-  */
-  to-key-identity = attrs:
-    let
-      keys = lib.sort (a: b: a < b) (lib.attrNames attrs);
-      mk-entry = k:
-        let
-          value = attrs.${k};
-        in
-          "${k}=${value}"
-      ;
-    in
-      lib.concatStringsSep "&" (lib.map mk-entry keys)
-  ;
 
   /**
     Build an X.509 certificate signed by the given private key.
@@ -71,6 +58,19 @@ let
     }
   ;
 
+  export-encrypted-pkey-pkey = { key-ref, key-identity, key-type }:
+  let
+    credential =
+      openssl.export-encrypted-pkey-pkey
+      key-ref
+      { inherit key-identity key-type; }
+    ;
+  in
+    {
+      inherit credential;
+    }
+  ;
+
   /**
     Retrieve or generate an OpenSSL private key.
     Accepts a `key-spec` with:
@@ -86,6 +86,8 @@ let
     - `x509`: a function to build X.509 certificates signed by this key.
     - `export-decryptable-pkey`: a function to export this private key encrypted
       with a symmetric key.
+    - `export-encrypted-pkey-pkey`: a function to export this private key encrypted
+      with another private key.
   */
   private-key-impl = key-spec:
   let
@@ -95,6 +97,7 @@ let
     };
   in
     {
+      inherit key-spec;
       identity = key-ref.key-identity;
       public-key-pem = openssl.public-key-pem key-ref;
       x509 =
@@ -106,6 +109,19 @@ let
         type-checker.function
         [ { name = "symmetric-key-params"; type = export-decryptable-pkey-params-type; } ]
         (symmetric-key-params: export-decryptable-pkey { inherit key-ref symmetric-key-params; })
+      ;
+      export-encrypted-pkey-pkey =
+        type-checker.function
+        [ { name = "credential-spec"; type = private-key-spec-type; } ]
+        (credential-spec:
+          callPackage ./export-encrypted.nix {
+            self-key-ref = key-ref;
+            encryption-key-ref = {
+              key-identity = to-key-identity credential-spec.attrs;
+              key-type = credential-spec.type;
+            };
+          }
+        )
       ;
     }
   ;

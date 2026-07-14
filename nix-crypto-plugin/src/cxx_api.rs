@@ -11,6 +11,9 @@ use nix_crypto_core::openssl::decryptable::{export_decryptable, IsOpensslSymmetr
 // Imports from this crate
 use crate::cxx_bridge::ffi::*;
 use crate::cxx_support::*;
+use crate::cxx_api::data::{CxxNixAttrs};
+
+pub mod data;
 
 pub fn rust_add(left: u64, right: u64) -> u64 {
     left + right
@@ -187,5 +190,23 @@ impl CxxNixCrypto {
             &symmetric_key,
             &OpensslPrivateKeyIdentityWrapper(&credential),
         )
+    }
+
+    /// Export an openssl private key credential encrypted with the given asymmetric key,
+    /// returning a PEM-formatted string containing the RSA-OAEP encrypted symmetric key
+    /// and the AES-256-CBC encrypted credential.
+    ///
+    /// This is a monomorphic wrapper around `export_encrypted` for the
+    /// `OpensslPrivateKeyIdentity` type on both type arguments, making it callable from C++.
+    pub fn cxx_export_encrypted_openssl_pkey_pkey<'a>(
+        &self,
+        key: OpensslPrivateKeyIdentity,
+        credential: OpensslPrivateKeyIdentity,
+    ) -> Result<Box<CxxNixAttrs<'a>>, Error> {
+        let result = self.0.export_encrypted(
+            &key,
+            &OpensslPrivateKeyIdentityWrapper(&credential),
+        )?;
+        Ok(Box::new(CxxNixAttrs::new(result)))
     }
 }

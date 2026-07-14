@@ -96,6 +96,14 @@ std::string CryptoNixPrimops::opensslExportDecryptableOpensslPkey(
 
 CryptoNixPrimops::~CryptoNixPrimops() {}
 
+
+rust::Box<CxxNixAttrs> CryptoNixPrimops::opensslExportEncryptedPkeyPkey(
+  OpensslPrivateKeyIdentity&& pkey,
+  OpensslPrivateKeyIdentity&& credential
+) {
+    return cryptoNix()->cxx_export_encrypted_openssl_pkey_pkey(pkey, credential);
+}
+
 void init_primops() {
 }
 

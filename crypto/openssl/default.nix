@@ -1,12 +1,13 @@
-{ pkgs, lib, prelude, ... }:
+{ pkgs, lib, prelude, newScope, ... }:
 let
-  modules = lib.makeScope pkgs.newScope (self:
+  modules = lib.makeScope newScope (self:
   let
     load-type = file: { type = self.callPackage file {}; inherit file; };
   in
     {
-      inherit prelude;
+      #inherit prelude;
       main = self.callPackage ./main.nix {};
+      common = self.callPackage ./common.nix {};
       types-common = self.callPackage ./types/common.nix {};
       x509-params-type = load-type ./types/x509-params-type.nix;
       private-key-spec-type = load-type ./types/private-key-spec-type.nix;

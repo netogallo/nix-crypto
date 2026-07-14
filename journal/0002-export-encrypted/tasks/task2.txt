@@ -1,0 +1,7 @@
+The function `nix-crypto-store::openssl::export_encrypted` must be added to the C++ layer following the pattern used for `nix-crypto-store::openssl::export_decryptable`. The function is polymorphic/generic, so a specific implementation needs to exist for every supported type. A present, the only supported concrete types are `OpensslPrivateKeyIdentity` on both type arguments (contrast to `export_decryptable` which uses OpensslSymmetricKeyIdentity and OpensslPrivateKeyIdentity).
+
+To achieve this, you probably need to modify the following files:
+  * `cxx_api.rs` in order to add a rust wrapper function which can be called from C++ world.
+  * `openssl_primops.cc` in order to handle the nix function call and construct the necessary data structures and dispatch the function to the rust layer.
+
+Given that all the types involved in the parameters and reuslt of the function are already supported by the cxx wrapper, there should be no need to add any code to convert to and from nix objects.

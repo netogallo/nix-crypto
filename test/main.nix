@@ -210,15 +210,20 @@ let
   let
     test-suites =
       lib.concatStringsSep "\n\n" (lib.map run-suite suites);
-  in
-    pkgs.writeScriptBin
+    tests-script =
+      pkgs.writeScript
       "nix-crypto-test-outcome"
       ''
       FAILURE=0
       ${test-suites}
       exit $FAILURE
       ''
-  ;
+    ;
+  in
+    pkgs.writeShellApplication {
+      name = "nix-crypto-test-outcome";
+      text = "${tests-script}";
+    };
 in
   run-suites [
     ./openssl.nix
