@@ -29,7 +29,7 @@ in
   };
   options.perSystem = mkPerSystemOption ({ pkgs, system, config, ... }:
   let
-    pkgs-ext = pkgs.extend tikal-crypto-overlay;
+    pkgs-ext = pkgs.extend nix-crypto-overlay;
     nix-crypto = pkgs-ext.callPackage ./nix-crypto.nix {};
     #nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
 
