@@ -7,8 +7,8 @@
 */
 { pkgs, nix-crypto-service, ... }:
 let
-  #crypto = pkgs.callPackage ../crypto/default.nix {};
-  inherit (pkgs.tikal) crypto;
+  #inherit (pkgs.tikal) crypto;
+  crypto = pkgs.nix-crypto.lib;
   inherit (crypto) openssl;
 
   # Generates an RSA key or returns the existing one from the store.

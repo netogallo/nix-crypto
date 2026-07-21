@@ -2,32 +2,36 @@
 let
   nix-crypto-version = "0.0.1";
   nixpkgs = self.inputs.nixpkgs;
-  tikal-prelude = self.inputs.tikal-prelude.overlays.default;
+  tikal-prelude = self.inputs.tikal-prelude.overlays.tikal-prelude;
   inherit (flake-parts-lib)
     mkPerSystemOption;
   inherit (lib)
     mkOption
     types;
-  tikal-crypto-overlay = 
+  nix-crypto-overlay = 
     final: prev-pkgs:
     let
       pkgs = prev-pkgs.extend tikal-prelude;
       inherit (pkgs) lib;
+      nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
     in
       {
-        tikal.crypto = pkgs.callPackage ./crypto/default.nix { inherit nix-crypto-version; };
+        nix-crypto = {
+          lib = pkgs.callPackage ./crypto/default.nix { inherit nix-crypto-version; };
+          inherit (nix-crypto.packages) nix-crypto-plugin nix-crypto nix-crypto-service;
+        };
       }
   ;
 in
 {
   config = {
-    flake.overlays.default = tikal-crypto-overlay;
+    flake.overlays.default = nix-crypto-overlay;
   };
   options.perSystem = mkPerSystemOption ({ pkgs, system, config, ... }:
   let
-    pkgs-ext = pkgs.extend tikal-crypto-overlay;
-    #nix-crypto = pkgs-ext.callPackage ./nix-crypto.nix {};
-    nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
+    pkgs-ext = pkgs.extend nix-crypto-overlay;
+    nix-crypto = pkgs-ext.callPackage ./nix-crypto.nix {};
+    #nix-crypto = pkgs.callPackage ./nix-crypto.nix {};
 
     test-args-base = ''{ system = \"${system}\"; nixpkgs = \"${nixpkgs}\"; }'';
     test-args-dev = ''(${test-args-base} // { nix-crypto-service = \"$PWD/target/debug/nix-crypto-service\"; })'';
