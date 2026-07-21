@@ -2,7 +2,7 @@
 let
   nix-crypto-version = "0.0.1";
   nixpkgs = self.inputs.nixpkgs;
-  tikal-prelude = self.inputs.tikal-prelude.overlays.default;
+  tikal-prelude = self.inputs.tikal-prelude.overlays.tikal-prelude;
   inherit (flake-parts-lib)
     mkPerSystemOption;
   inherit (lib)
