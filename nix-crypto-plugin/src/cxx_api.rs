@@ -98,6 +98,14 @@ impl ffi::IsX509KeyUsage for X509KeyUsage {
     fn crl_sign(&self) -> bool {
         self.crl_sign
     }
+
+    fn digital_signature(&self) -> bool {
+        self.digital_signature
+    }
+
+    fn key_encipherment(&self) -> bool {
+        self.key_encipherment
+    }
 }
 
 impl ffi::IsX509BasicConstraints for X509BasicConstraints {

@@ -47,6 +47,11 @@ pub mod ffi {
         pub ca: bool
     }
 
+    pub struct X509SubjectAlternativeName {
+        pub critical: bool,
+        pub dns: Vec<String>
+    }
+
     /// This struct identifies a X509Certificate. Note that
     /// each parameter has additional constraints. The expectation
     /// is that the same set of parameters will result in the same
@@ -102,7 +107,14 @@ pub mod ffi {
         /// extension.
         /// Todo: replace with an 'Option' once this is supported
         /// by the 'cxx' crate.
-        pub extension_basic_constraints: Vec<X509BasicConstraints>
+        pub extension_basic_constraints: Vec<X509BasicConstraints>,
+        /// This controls the parameters passed to the
+        /// `openssl::x509::extension::SubjectAlternativeName` extension.
+        /// The value can either be (1) empty, meaning the extension is not
+        /// used or (2) A single value which will contain the parameters
+        /// applied to the "subject alternative name" extension.
+        /// Todo: replace with a proper `Option` once CXX supports it.
+        pub extension_subject_alternative_name: Vec<X509SubjectAlternativeName>
     }
 
     extern "Rust" {

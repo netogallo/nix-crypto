@@ -44,6 +44,8 @@ pub mod ffi {
         fn critical(&self) -> bool;
         fn key_cert_sign(&self) -> bool;
         fn crl_sign(&self) -> bool;
+        fn digital_signature(&self) -> bool;
+        fn key_encipherment(&self) -> bool;
     }
 
     pub trait IsX509BasicConstraints {
@@ -100,6 +102,14 @@ pub mod ffi {
     
         if key_usage.crl_sign() {
             builder.crl_sign();
+        }
+
+        if key_usage.key_encipherment() {
+            builder.key_encipherment();
+        }
+
+        if key_usage.digital_signature() {
+            builder.digital_signature();
         }
     
         Ok(builder.build()?)
@@ -226,6 +236,8 @@ impl CryptoNix {
         };
 
         let mut builder = X509Builder::new()?;
+        builder.set_version(2)?;
+
         let issuer_name = ffi::build_issuer_name(params)?;
         let subject_name = ffi::build_subject_name(params)?;
 
