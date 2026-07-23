@@ -37,7 +37,9 @@ pub mod ffi {
     pub struct X509KeyUsage {
         pub critical: bool,
         pub key_cert_sign: bool,
-        pub crl_sign: bool
+        pub crl_sign: bool,
+        pub key_encipherment: bool,
+        pub digital_signature: bool
     }
 
     pub struct X509BasicConstraints {

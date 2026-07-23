@@ -104,7 +104,22 @@ static void primop_openssl_public_key_pem(EvalState& state, const PosIdx pos, Va
 const std::string K_KEY_USAGE_CRITICAL = "critical";
 const std::string K_KEY_USAGE_CRL_SIGN = "crl-sign";
 const std::string K_KEY_USAGE_KEY_CERT_SIGN = "key-cert-sign";
+const std::string K_KEY_ENCIPHERMENT = "key-encipherment";
+const std::string K_DIGITAL_SIGNATURE = "digital-signature";
 
+/**
+ * \brief Construct a \ref X509KeyUsage struct from a nix attribute set.
+ * \param key The attribute that holds the set that will be parsed.
+ * \param attrs The attribute set which contains an element under the 'key'
+ *  attribute that will be converted to the struct.
+ * \return On success, it returns a \ref rust::Vec containing a single element
+ *  which is the instance of \ref X509KeyUsage. An empty vector is returned if the
+ *  attribute set does not contain the provided key.
+ * \details Attempts converting an arbitrary nix attribute set into an instance of the
+ *  \ref X509KeyUsage struct. It checks that all the attributes in the set have
+ *  the correct name and type. It then proceeds to convert the nix values into
+ *  native C values.
+ */
 static rust::Vec<X509KeyUsage> tryGetKeyUsage(EvalState& state, const PosIdx pos, const std::string& key, Value& attrs) {
 
     auto attr = attrs.attrs()->get(state.symbols.create(key));
@@ -160,10 +175,35 @@ static rust::Vec<X509KeyUsage> tryGetKeyUsage(EvalState& state, const PosIdx pos
         );
     }
 
+    auto keyEnciphermentAttr = value.attrs()->get(state.symbols.create(K_KEY_ENCIPHERMENT));
+    auto keyEncipherment = false;
+
+    if(keyEnciphermentAttr) {
+        keyEncipherment = state.forceBool(
+            *keyEnciphermentAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the x509 'key usage' extension must be a bool", K_KEY_ENCIPHERMENT)
+        );
+    }
+
+    auto digitalSignatureAttr =
+        value.attrs()->get(state.symbols.create(K_DIGITAL_SIGNATURE));
+    auto digitalSignature = false;
+
+    if(digitalSignatureAttr) {
+        digitalSignature = state.forceBool(
+            *digitalSignatureAttr->value,
+            pos,
+            std::format("the value of the '{}' attribute provided for the x5099 'key usage' extension must be a bool", K_DIGITAL_SIGNATURE)
+        );
+    }
+
     return {
         { .critical = critical
         , .key_cert_sign = keyCertSign
         , .crl_sign = crlSign
+        , .key_encipherment = keyEncipherment
+        , .digital_signature = digitalSignature
         }
     };
 }

@@ -39,6 +39,34 @@ let
         default = false;
         description = "cRLSign usage bit.";
       };
+
+      digital-signature = lib.mkOption {
+        type = types.bool;
+        default = false;
+        description = "The 'digital signature' usage bit."; 
+      };
+
+      key-encipherment = lib.mkOption {
+        type = types.bool;
+        default = false;
+        description = "Sets the 'key encipherment' usage bit.";
+      };
+    };
+  });
+
+  subjectAlternativeNameType = types.submodule ({ ... }: {
+    options = {
+      critical = lib.mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether the 'Subject Alternative Name' extension is critical.";
+      };
+
+      dns = lib.mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = "Sets the dns entries of the subject alternative name.";
+      };
     };
   });
 
