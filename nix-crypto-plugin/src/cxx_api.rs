@@ -108,6 +108,16 @@ impl ffi::IsX509KeyUsage for X509KeyUsage {
     }
 }
 
+impl ffi::IsX509SubjectAlternativeName for X509SubjectAlternativeName {
+    fn critical(&self) -> bool {
+        self.critical
+    }
+
+    fn dns(&self) -> &[String] {
+        self.dns.as_slice()
+    }
+}
+
 impl ffi::IsX509BasicConstraints for X509BasicConstraints {
     fn critical(&self) -> bool {
         self.critical

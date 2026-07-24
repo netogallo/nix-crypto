@@ -48,6 +48,11 @@ pub mod ffi {
         fn key_encipherment(&self) -> bool;
     }
 
+    pub trait IsX509SubjectAlternativeName {
+        fn critical(&self) -> bool;
+        fn dns(&self) -> &[String];
+    }
+
     pub trait IsX509BasicConstraints {
         fn critical(&self) -> bool; 
         fn ca(&self) -> bool;
@@ -85,6 +90,23 @@ pub mod ffi {
     fn parse_date_rfc3339(date: &str) -> Result<Asn1Time, Error> {
         let utc = UtcDateTime::parse(date, &Rfc3339)?;
         Ok(Asn1Time::from_unix(utc.unix_timestamp())?)
+    }
+
+    pub fn as_subject_alternative_name_extension<T: IsX509SubjectAlternativeName>(
+        san: &T,
+        ctx: &X509v3Context
+    ) -> Result<X509Extension, Error> {
+        let mut builder = SubjectAlternativeName::new();
+
+        if san.critical() {
+            builder.critical();
+        }
+
+        for dns in san.dns() {
+            builder.dns(dns);
+        }
+
+        Ok(builder.build(ctx)?)
     }
 
     
