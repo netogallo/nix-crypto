@@ -8,12 +8,15 @@
       url = "github:netogallo/tikal-prelude";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    devtools-flake.url = "github:netogallo/devtools-flake";
   };
 
-  outputs = inputs@{ flake-parts, nixpkgs, ... }:
+  outputs = inputs@{ flake-parts, nixpkgs, devtools-flake, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
         ./flakeModule.nix
+        ./development-tools.nix
+        devtools-flake.flakeModules.default
         # To import an internal flake module: ./other.nix
         # To import an external flake module:
         #   1. Add foo to inputs
